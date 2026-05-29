@@ -130,6 +130,9 @@
           multiMonthMaxColumns: 3,
           multiMonthMinWidth: 130,
         },
+        timeGridWeek: {
+          firstDay: 1,
+        },
         listMonth: {
           buttonText: "日程",
         },
@@ -329,6 +332,20 @@
     });
   }
 
+  function firstDayForView(viewType) {
+    return viewType === "timeGridWeek" ? 1 : 0;
+  }
+
+  function changeCalendarView(viewType, dateText) {
+    if (!state.calendar) return;
+    state.calendar.setOption("firstDay", firstDayForView(viewType));
+    if (dateText) {
+      state.calendar.changeView(viewType, dateText);
+      return;
+    }
+    state.calendar.changeView(viewType);
+  }
+
   function toCalendarEvent(event) {
     return {
       id: event.id,
@@ -465,7 +482,7 @@
   function openMonthView(dateText) {
     if (!state.calendar) return;
     state.selectedDate = dateText;
-    state.calendar.changeView("dayGridMonth", dateText);
+    changeCalendarView("dayGridMonth", dateText);
   }
 
   function gotoMonth(year, month) {
@@ -609,7 +626,7 @@
   viewTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-view]");
     if (!button || !state.calendar) return;
-    state.calendar.changeView(button.dataset.view);
+    changeCalendarView(button.dataset.view);
   });
 
   calendarElement.addEventListener("click", (event) => {
