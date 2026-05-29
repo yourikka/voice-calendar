@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Calendar</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#calendar-title">跳到日历</a>
+
+    <div class="app-shell">
+      <header class="topbar" aria-label="工作台顶部">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+        </div>
+        <div class="month-heading">
+          <h1 id="calendar-title"><span>2026</span><i>/</i><strong>05</strong></h1>
+          <p>默认视图</p>
+        </div>
+
+        <form class="command-bar" id="command-form">
+          <label class="sr-only" for="command-input">输入日历指令</label>
+          <input
+            id="command-input"
+            name="command"
+            type="text"
+            autocomplete="off"
+            placeholder="输入：明早八点提醒我带身份证"
+          />
+          <button type="submit" aria-label="发送指令">发送</button>
+        </form>
+
+        <div class="toolbar" aria-label="视图工具">
+          <button type="button" title="刷新" aria-label="刷新数据" id="refresh-button">
+            <span aria-hidden="true">R</span>
+          </button>
+          <button type="button" title="搜索" aria-label="搜索">
+            <span aria-hidden="true">Q</span>
+          </button>
+          <button type="button" title="更多" aria-label="更多">
+            <span aria-hidden="true">M</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="hot-panel" aria-labelledby="hot-title">
+          <div class="panel-heading">
+            <p>今日热点</p>
+            <button id="hot-refresh" type="button">刷新</button>
+          </div>
+          <div id="hot-list" class="hot-list" aria-live="polite"></div>
+        </aside>
+
+        <section class="calendar-panel" aria-labelledby="month-title">
+          <div class="view-tabs" role="tablist" aria-label="日历视图">
+            <button type="button" role="tab">年</button>
+            <button type="button" role="tab" aria-selected="true">月</button>
+            <button type="button" role="tab">周</button>
+            <button type="button" role="tab">日</button>
+            <button type="button" role="tab">日程</button>
+          </div>
+
+          <div class="week-row" aria-hidden="true">
+            <span>日</span>
+            <span>一</span>
+            <span>二</span>
+            <span>三</span>
+            <span>四</span>
+            <span>五</span>
+            <span>六</span>
+          </div>
+
+          <div id="month-grid" class="month-grid" role="grid" aria-label="2026 年 5 月"></div>
+
+          <div class="lunar-strip">
+            <span>四月十三 丙午年 [马] 癸巳月 癸卯日</span>
+            <button type="button" aria-label="展开农历信息">›</button>
+          </div>
+        </section>
+
+        <aside class="agenda-panel" aria-labelledby="agenda-title">
+          <div class="panel-heading">
+            <p id="agenda-title">今日日程</p>
+            <span id="agenda-count">0</span>
+          </div>
+          <div id="agenda-list" class="agenda-list" aria-live="polite"></div>
+          <button class="add-button" id="quick-add" type="button">+</button>
+        </aside>
+      </main>
+    </div>
+
+    <section class="voice-float" id="voice-panel" aria-label="语音输入">
+      <button id="voice-button" class="voice-button" type="button" aria-label="开始语音输入">
+        <span aria-hidden="true"></span>
+      </button>
+      <div class="voice-copy">
+        <strong id="voice-state">点击说话</strong>
+        <p id="assistant-reply">语音或文本指令会显示在这里。</p>
+      </div>
+    </section>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

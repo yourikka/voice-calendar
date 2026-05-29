@@ -25,6 +25,12 @@ Start the API:
 
 The API starts at `http://127.0.0.1:8000`.
 
+Open the Web workspace:
+
+```text
+http://127.0.0.1:8000/
+```
+
 ## Implemented MVP
 
 - Health check: `GET /api/health`
@@ -33,6 +39,18 @@ The API starts at `http://127.0.0.1:8000`.
 - Text command entrypoint: `POST /api/text/commands`
 - Hot topics and daily briefing: `GET /api/news/today`, `GET /api/calendar/hot-topics`, `GET /api/briefings/daily`
 - MCP-style tool adapter: `POST /api/mcp/tools/{tool_name}`
+- Desktop Web workspace: `GET /`
+
+## Web Workspace
+
+The desktop workspace follows a three-column layout:
+
+- Left: real-time hot topics
+- Center: monthly calendar
+- Right: selected-day agenda
+- Floating voice control: Web Speech API input, with text input fallback
+
+The page calls the backend APIs directly, so start the API and open `http://127.0.0.1:8000/`.
 
 ## MCP Tool Examples
 
@@ -47,4 +65,3 @@ curl -X POST http://127.0.0.1:8000/api/mcp/tools/news.get_today_hot_topics \
   -H 'Content-Type: application/json' \
   -d '{"arguments":{"timezone":"Asia/Shanghai","limit":3,"fresh":true}}'
 ```
-
