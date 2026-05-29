@@ -13,9 +13,6 @@
 
     <div class="app-shell">
       <header class="topbar" aria-label="工作台顶部">
-        <div class="brand-mark" aria-hidden="true">
-          <span></span>
-        </div>
         <div class="month-heading">
           <button id="month-picker-toggle" class="month-title-button" type="button" aria-haspopup="dialog">
             <span id="heading-year">2026</span><i>/</i><strong id="heading-month">05</strong>
@@ -41,20 +38,14 @@
             name="command"
             type="text"
             autocomplete="off"
-            placeholder="输入：明早八点提醒我带身份证"
+            placeholder="输入：明早八点提醒我带身份证，或搜索 周会"
           />
           <button type="submit" aria-label="发送指令">发送</button>
         </form>
 
         <div class="toolbar" aria-label="视图工具">
-          <button type="button" title="刷新" aria-label="刷新数据" id="refresh-button">
-            <span aria-hidden="true">R</span>
-          </button>
-          <button type="button" title="搜索" aria-label="搜索">
-            <span aria-hidden="true">Q</span>
-          </button>
-          <button type="button" title="更多" aria-label="更多">
-            <span aria-hidden="true">M</span>
+          <button type="button" title="搜索日程" aria-label="搜索日程" id="search-button">
+            <span aria-hidden="true">⌕</span>
           </button>
         </div>
       </header>
@@ -103,6 +94,7 @@
       <div class="voice-copy">
         <strong id="voice-state">点击说话</strong>
         <p id="assistant-reply">语音或文本指令会显示在这里。</p>
+        <button id="voice-cancel" class="voice-cancel" type="button" hidden>取消</button>
       </div>
     </section>
 

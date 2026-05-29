@@ -5,11 +5,15 @@
     selectedDate: "2026-05-29",
     timezone: "Asia/Shanghai",
     events: [],
+    searchTerm: "",
     calendar: null,
+    recognition: null,
+    listening: false,
   };
 
   const hotList = document.querySelector("#hot-list");
   const agendaList = document.querySelector("#agenda-list");
+  const agendaTitle = document.querySelector("#agenda-title");
   const agendaCount = document.querySelector("#agenda-count");
   const commandForm = document.querySelector("#command-form");
   const commandInput = document.querySelector("#command-input");
@@ -17,7 +21,8 @@
   const voiceState = document.querySelector("#voice-state");
   const voicePanel = document.querySelector("#voice-panel");
   const voiceButton = document.querySelector("#voice-button");
-  const refreshButton = document.querySelector("#refresh-button");
+  const voiceCancel = document.querySelector("#voice-cancel");
+  const searchButton = document.querySelector("#search-button");
   const hotRefresh = document.querySelector("#hot-refresh");
   const quickAdd = document.querySelector("#quick-add");
   const viewTabs = document.querySelector(".view-tabs");
@@ -58,6 +63,7 @@
           type: "multiMonth",
           duration: { years: 1 },
           multiMonthMaxColumns: 3,
+          multiMonthMinWidth: 130,
         },
         listMonth: {
           buttonText: "日程",
@@ -111,35 +117,52 @@
   }
 
   function selectedDayEvents() {
-    return state.events.filter((event) => event.start_at.slice(0, 10) === state.selectedDate);
+    return filteredEvents().filter((event) => event.start_at.slice(0, 10) === state.selectedDate);
+  }
+
+  function filteredEvents() {
+    const keyword = state.searchTerm.trim().toLowerCase();
+    if (!keyword) return state.events;
+    return state.events.filter((event) => {
+      return [
+        event.title,
+        event.description,
+        event.location,
+        event.type,
+      ].some((value) => String(value || "").toLowerCase().includes(keyword));
+    });
   }
 
   function renderAgenda() {
-    const dayEvents = selectedDayEvents();
-    agendaCount.textContent = String(dayEvents.length);
-    if (!dayEvents.length) {
+    const agendaEvents = state.searchTerm ? filteredEvents() : selectedDayEvents();
+    agendaTitle.textContent = state.searchTerm ? "搜索结果" : "所选日程";
+    agendaCount.textContent = String(agendaEvents.length);
+    if (!agendaEvents.length) {
+      const emptyLabel = state.searchTerm ? "无匹配日程" : "无日程";
       agendaList.innerHTML = `
         <div class="empty-state">
           <div>
             <div aria-hidden="true" class="brand-mark"><span></span></div>
-            <b>无日程</b>
+            <b>${emptyLabel}</b>
           </div>
         </div>
       `;
       return;
     }
 
-    agendaList.innerHTML = dayEvents.map((event) => {
+    agendaList.innerHTML = agendaEvents.map((event) => {
       const start = formatTime(event.start_at);
       const end = event.end_at ? formatTime(event.end_at) : "";
+      const date = formatDate(event.start_at);
       return `
         <article class="agenda-item">
           <b>${escapeHtml(event.title)}</b>
           <p>${event.type === "reminder" ? "提醒" : "日程"}</p>
           <div class="agenda-meta">
-            <span>${start}${end ? `-${end}` : ""}</span>
+            <span>${state.searchTerm ? `${date} ` : ""}${start}${end ? `-${end}` : ""}</span>
             <span>${escapeHtml(event.location || "默认日历")}</span>
           </div>
+          <button class="delete-event" type="button" data-event-id="${event.id}">删除</button>
         </article>
       `;
     }).join("");
@@ -162,10 +185,26 @@
     const response = await fetch(`/api/events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
     const data = await response.json();
     state.events = data.items || [];
-    state.calendar.removeAllEvents();
-    state.calendar.addEventSource(state.events.map(toCalendarEvent));
+    refreshCalendarEvents();
     markSelectedDate();
     renderAgenda();
+  }
+
+  function refreshCalendarEvents() {
+    state.calendar.removeAllEvents();
+    state.calendar.addEventSource(filteredEvents().map(toCalendarEvent));
+  }
+
+  function applySearch(term) {
+    state.searchTerm = term;
+    refreshCalendarEvents();
+    markSelectedDate();
+    renderAgenda();
+    assistantReply.textContent = term ? `已筛选包含“${term}”的日程。` : "已清除日程搜索。";
+  }
+
+  function parseSearchTerm(value) {
+    return value.trim().replace(/^搜索[:：\s]*/, "").trim();
   }
 
   function markSelectedDate() {
@@ -234,12 +273,15 @@
     }
 
     const recognition = new SpeechRecognition();
+    state.recognition = recognition;
     recognition.lang = "zh-CN";
     recognition.interimResults = false;
     recognition.continuous = false;
 
     recognition.addEventListener("start", () => {
+      state.listening = true;
       voicePanel.classList.add("is-listening");
+      voiceCancel.hidden = false;
       voiceState.textContent = "正在聆听";
       assistantReply.textContent = "说出你的日程或热点指令。";
     });
@@ -250,16 +292,33 @@
       sendCommand(transcript);
     });
     recognition.addEventListener("end", () => {
+      state.listening = false;
       voicePanel.classList.remove("is-listening");
+      voiceCancel.hidden = true;
       if (voiceState.textContent === "正在聆听") voiceState.textContent = "点击说话";
     });
     recognition.addEventListener("error", () => {
+      state.listening = false;
       voicePanel.classList.remove("is-listening");
+      voiceCancel.hidden = true;
       voiceState.textContent = "识别失败";
       assistantReply.textContent = "可以再点一次，或直接输入文字。";
     });
 
-    voiceButton.addEventListener("click", () => recognition.start());
+    voiceButton.addEventListener("click", () => {
+      if (state.listening) {
+        recognition.abort();
+        voiceState.textContent = "已取消";
+        assistantReply.textContent = "语音输入已取消。";
+        return;
+      }
+      recognition.start();
+    });
+    voiceCancel.addEventListener("click", () => {
+      recognition.abort();
+      voiceState.textContent = "已取消";
+      assistantReply.textContent = "语音输入已取消。";
+    });
   }
 
   function formatTime(value) {
@@ -267,6 +326,13 @@
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
+    });
+  }
+
+  function formatDate(value) {
+    return new Date(value).toLocaleDateString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
     });
   }
 
@@ -298,11 +364,34 @@
 
   commandForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    sendCommand(commandInput.value);
+    const value = commandInput.value.trim();
+    if (value.startsWith("搜索")) {
+      applySearch(parseSearchTerm(value));
+      return;
+    }
+    sendCommand(value);
   });
 
-  refreshButton.addEventListener("click", () => Promise.all([loadCurrentEvents(), loadHotTopics(true)]));
+  searchButton.addEventListener("click", () => {
+    const term = parseSearchTerm(commandInput.value);
+    if (term) {
+      applySearch(term);
+      commandInput.select();
+      return;
+    }
+    commandInput.focus();
+  });
+  commandInput.addEventListener("input", () => {
+    if (!commandInput.value.trim() && state.searchTerm) applySearch("");
+  });
   hotRefresh.addEventListener("click", () => loadHotTopics(true));
+  agendaList.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-event-id]");
+    if (!button) return;
+    await fetch(`/api/events/${button.dataset.eventId}`, { method: "DELETE" });
+    assistantReply.textContent = "已删除日程。";
+    await loadCurrentEvents();
+  });
   quickAdd.addEventListener("click", () => {
     commandInput.value = "明天下午三点提醒我开项目会";
     commandInput.focus();

@@ -8,6 +8,8 @@ def test_frontend_index_and_static_assets(client: TestClient) -> None:
     assert "Voice Calendar" in index.text
     assert 'id="calendar"' in index.text
     assert 'id="voice-button"' in index.text
+    assert 'id="voice-cancel"' in index.text
+    assert 'id="search-button"' in index.text
     assert "fullcalendar" in index.text.lower()
 
     css = client.get("/static/app.css")
