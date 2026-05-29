@@ -467,6 +467,10 @@ button {
   margin: 0;
   font-size: clamp(30px, 3vw, 46px);
   font-weight: 800;
+  color: #18191c;
+}
+
+.calendar-widget .fc-dayGridMonth-view .fc-day-past .fc-daygrid-day-number {
   color: #9c9fa5;
 }
 

@@ -5,6 +5,7 @@
     selectedDate: "2026-05-29",
     timezone: "Asia/Shanghai",
     events: [],
+    dayMetaByDate: {},
     searchTerm: "",
     calendar: null,
     recognition: null,
@@ -38,23 +39,6 @@
   const yearLegendLeft = document.querySelector("#year-legend-left");
   const yearLegendRight = document.querySelector("#year-legend-right");
   const lunarSummary = document.querySelector("#lunar-summary");
-
-  const monthSpecialDays = {
-    "2026-05-01": { label: "劳动节", badge: "休" },
-    "2026-05-02": { badge: "休" },
-    "2026-05-03": { badge: "休" },
-    "2026-05-04": { label: "青年节", dot: true, badge: "休" },
-    "2026-05-05": { label: "立夏", badge: "休" },
-    "2026-05-09": { badge: "班" },
-    "2026-05-10": { label: "母亲节" },
-    "2026-05-13": { dot: true },
-    "2026-05-14": { dot: true },
-    "2026-05-17": { label: "四月", dot: true },
-    "2026-05-18": { dot: true },
-    "2026-05-21": { label: "小满" },
-    "2026-05-22": { dot: true },
-    "2026-05-27": { dot: true },
-  };
 
   const lunarDayLabels = {
     1: "初一",
@@ -153,7 +137,7 @@
       datesSet(info) {
         syncViewChrome(info.view.type, info.view.currentStart);
         updateActiveTab(info.view.type);
-        loadEventsForRange(info.startStr, info.endStr);
+        loadViewData(info.startStr, info.endStr);
       },
       dateClick(info) {
         if (info.view.type === "multiMonthYear") {
@@ -213,13 +197,37 @@
 
   function getMonthCellMeta(dateKey) {
     const lunar = getChineseCalendarInfo(dateKey);
-    const special = monthSpecialDays[dateKey] || {};
+    const remoteMeta = state.dayMetaByDate[dateKey] || {};
+    const customFestival = getCustomFestival(dateKey);
     return {
-      badge: special.badge || "",
-      dot: Boolean(special.dot),
-      isFestival: Boolean(special.label),
-      label: special.label || lunar.dayLabel,
+      badge: remoteMeta.is_holiday ? "休" : (remoteMeta.is_adjusted_workday ? "班" : ""),
+      dot: Boolean(customFestival.dot),
+      isFestival: Boolean(remoteMeta.solar_term || customFestival.label || remoteMeta.holiday_name),
+      label: remoteMeta.solar_term
+        || customFestival.label
+        || remoteMeta.holiday_name
+        || (lunar.dayLabel === "初一" ? lunar.monthLabel : lunar.dayLabel),
     };
+  }
+
+  function getCustomFestival(dateKey) {
+    const [yearText, monthText, dayText] = dateKey.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    if (month === 5 && day === 4) return { label: "青年节", dot: true };
+    if (month === 5 && dateKey === getNthWeekdayOfMonth(year, 5, 0, 2)) {
+      return { label: "母亲节", dot: false };
+    }
+    return { label: "", dot: false };
+  }
+
+  function getNthWeekdayOfMonth(year, month, weekday, nth) {
+    const first = new Date(`${year}-${String(month).padStart(2, "0")}-01T12:00:00+08:00`);
+    const firstWeekday = first.getUTCDay();
+    const offset = (weekday - firstWeekday + 7) % 7;
+    const day = 1 + offset + ((nth - 1) * 7);
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
   function syncViewChrome(viewType, date) {
@@ -257,28 +265,13 @@
 
   function updateLunarSummary() {
     const lunar = getChineseCalendarInfo(state.selectedDate);
-    lunarSummary.textContent = `${lunar.monthLabel}${lunar.dayLabel} ${lunar.cyclicalYear}年 [${lunar.zodiac}]`;
+    const remoteMeta = state.dayMetaByDate[state.selectedDate] || {};
+    const suffix = remoteMeta.solar_term ? ` ${remoteMeta.solar_term}` : "";
+    lunarSummary.textContent = `${lunar.monthLabel}${lunar.dayLabel} ${lunar.cyclicalYear}年 [${lunar.zodiac}]${suffix}`;
   }
 
   function decorateDayCell(info) {
-    const frame = info.el.querySelector(".fc-daygrid-day-frame");
-    if (!frame) return;
-    frame.querySelectorAll(".month-cell-meta, .month-cell-status").forEach((node) => node.remove());
-    if (info.view.type !== "dayGridMonth" || info.isOther) return;
-    const meta = getMonthCellMeta(formatDateKey(info.date));
-    if (meta.badge) {
-      const status = document.createElement("span");
-      status.className = `month-cell-status ${meta.badge === "班" ? "is-work" : "is-rest"}`;
-      status.textContent = meta.badge;
-      frame.append(status);
-    }
-    const detail = document.createElement("div");
-    detail.className = `month-cell-meta ${meta.isFestival ? "is-festival" : ""}`;
-    detail.innerHTML = `
-      <span class="month-cell-text">${meta.label}</span>
-      ${meta.dot ? '<span class="month-cell-dot" aria-hidden="true"></span>' : ""}
-    `;
-    frame.insertBefore(detail, frame.querySelector(".fc-daygrid-day-events"));
+    decorateDayCellElement(info.el, info.view.type, info.isOther, formatDateKey(info.date));
   }
 
   function decorateYearView() {
@@ -294,6 +287,40 @@
         monthElement.classList.toggle("is-current-month", monthText === currentMonth);
       });
     });
+  }
+
+  function decorateVisibleDayCells() {
+    if (!state.calendar) return;
+    const viewType = state.calendar.view.type;
+    calendarElement.querySelectorAll(".fc-daygrid-day[data-date]").forEach((cell) => {
+      decorateDayCellElement(
+        cell,
+        viewType,
+        cell.classList.contains("fc-day-other"),
+        cell.dataset.date,
+      );
+    });
+  }
+
+  function decorateDayCellElement(cell, viewType, isOther, dateKey) {
+    const frame = cell.querySelector(".fc-daygrid-day-frame");
+    if (!frame) return;
+    frame.querySelectorAll(".month-cell-meta, .month-cell-status").forEach((node) => node.remove());
+    if (viewType !== "dayGridMonth" || isOther) return;
+    const meta = getMonthCellMeta(dateKey);
+    if (meta.badge) {
+      const status = document.createElement("span");
+      status.className = `month-cell-status ${meta.badge === "班" ? "is-work" : "is-rest"}`;
+      status.textContent = meta.badge;
+      frame.append(status);
+    }
+    const detail = document.createElement("div");
+    detail.className = `month-cell-meta ${meta.isFestival ? "is-festival" : ""}`;
+    detail.innerHTML = `
+      <span class="month-cell-text">${meta.label}</span>
+      ${meta.dot ? '<span class="month-cell-dot" aria-hidden="true"></span>' : ""}
+    `;
+    frame.insertBefore(detail, frame.querySelector(".fc-daygrid-day-events"));
   }
 
   function updateActiveTab(viewType) {
@@ -386,6 +413,24 @@
     refreshCalendarEvents();
     markSelectedDate();
     renderAgenda();
+  }
+
+  async function loadCalendarMetaForRange(start, end) {
+    const response = await fetch(
+      `/api/calendar/meta?start=${encodeURIComponent(start.slice(0, 10))}&end=${encodeURIComponent(end.slice(0, 10))}`,
+    );
+    const data = await response.json();
+    state.dayMetaByDate = Object.fromEntries((data.items || []).map((item) => [item.date, item]));
+    decorateVisibleDayCells();
+    updateLunarSummary();
+    updateYearLegend(state.calendar?.view.type || "dayGridMonth");
+  }
+
+  async function loadViewData(start, end) {
+    await Promise.all([
+      loadEventsForRange(start, end),
+      loadCalendarMetaForRange(start, end),
+    ]);
   }
 
   function refreshCalendarEvents() {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -176,6 +176,20 @@ class DailyBriefingResponse(BaseModel):
     timezone: str
     sections: list[BriefingSection]
     spoken_summary: str
+
+
+class CalendarMetaDayRead(BaseModel):
+    date: date
+    is_holiday: bool
+    is_adjusted_workday: bool
+    holiday_name: str | None = None
+    solar_term: str | None = None
+
+
+class CalendarMetaResponse(BaseModel):
+    start: date
+    end: date
+    items: list[CalendarMetaDayRead]
 
 
 class MCPToolRequest(BaseModel):

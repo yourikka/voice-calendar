@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 import sqlite3
@@ -8,6 +8,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from app.db import get_connection
 from app.models import (
+    CalendarMetaDayRead,
+    CalendarMetaResponse,
     DailyBriefingResponse,
     ConfirmOperationRequest,
     ConfirmOperationResponse,
@@ -27,6 +29,7 @@ from app.models import (
     TextCommandResponse,
     UndoResponse,
 )
+from app.services.almanac import AlmanacService
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.command import TextCommandService
@@ -163,6 +166,24 @@ def get_calendar_hot_topics(
     service: NewsService = Depends(get_news_service),
 ) -> HotTopicPanelResponse:
     return service.get_hot_topic_panel(date=date, timezone_name=timezone, limit=limit)
+
+
+@router.get("/calendar/meta", response_model=CalendarMetaResponse)
+def get_calendar_meta(
+    start: Annotated[date, Query()],
+    end: Annotated[date, Query()],
+) -> CalendarMetaResponse:
+    items = [
+        CalendarMetaDayRead(
+            date=item.date,
+            is_holiday=item.is_holiday,
+            is_adjusted_workday=item.is_adjusted_workday,
+            holiday_name=item.holiday_name,
+            solar_term=item.solar_term,
+        )
+        for item in AlmanacService().list_day_meta(start, end)
+    ]
+    return CalendarMetaResponse(start=start, end=end, items=items)
 
 
 @router.post("/news/hot-topics/refresh", response_model=HotTopicRefreshResponse)
