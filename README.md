@@ -46,7 +46,7 @@ http://127.0.0.1:8000/
 The desktop workspace follows a three-column layout:
 
 - Left: real-time hot topics
-- Center: monthly calendar
+- Center: FullCalendar-powered year/month/week/day/list calendar
 - Right: selected-day agenda
 - Floating voice control: Web Speech API input, with text input fallback
 

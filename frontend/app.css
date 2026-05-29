@@ -299,79 +299,135 @@ button {
   box-shadow: 0 8px 24px rgb(0 0 0 / 8%);
 }
 
-.week-row,
-.month-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+.calendar-widget {
+  min-height: 570px;
+  padding: 0 28px 8px;
 }
 
-.week-row {
-  padding: 0 38px 18px;
-  border-bottom: 1px solid var(--line);
+.calendar-widget .fc {
+  --fc-border-color: var(--line);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: transparent;
+  --fc-event-bg-color: var(--accent);
+  --fc-event-border-color: var(--accent);
+  --fc-event-text-color: #fff;
+  --fc-today-bg-color: transparent;
+  color: var(--ink);
+}
+
+.calendar-widget .fc-scrollgrid,
+.calendar-widget .fc-theme-standard td,
+.calendar-widget .fc-theme-standard th {
+  border-color: var(--line);
+}
+
+.calendar-widget .fc-scrollgrid {
+  border-left: 0;
+  border-right: 0;
+}
+
+.calendar-widget .fc-col-header-cell {
+  height: 54px;
+  vertical-align: middle;
+  background: transparent;
+}
+
+.calendar-widget .fc-col-header-cell-cushion {
   color: #111;
   font-size: 20px;
   font-weight: 800;
-  text-align: center;
+  text-decoration: none;
 }
 
-.month-grid {
-  padding: 24px 28px 8px;
-  min-height: 540px;
+.calendar-widget .fc-daygrid-day-frame {
+  min-height: 104px;
+  padding: 8px;
 }
 
-.day-cell {
-  min-height: 106px;
-  padding: 12px 6px;
-  text-align: center;
-  border-radius: var(--radius);
-  color: #8d8e91;
+.calendar-widget .fc-daygrid-day-number {
+  display: inline-grid;
+  place-items: center;
   position: relative;
+  min-width: 52px;
+  min-height: 52px;
+  color: #8d8e91;
+  font-size: clamp(26px, 2.8vw, 42px);
+  font-weight: 800;
+  text-decoration: none;
 }
 
-.day-cell strong {
-  display: block;
-  font-size: clamp(28px, 3vw, 44px);
-  line-height: 1;
-  letter-spacing: 0;
+.calendar-widget .fc .fc-daygrid-day.fc-day-today,
+.calendar-widget .fc .fc-timegrid-col.fc-day-today,
+.calendar-widget .fc-theme-standard td.fc-day-today,
+.calendar-widget .fc-daygrid-day.fc-day-today .fc-daygrid-day-frame {
+  background: #fff !important;
+  background-color: #fff !important;
 }
 
-.day-cell small {
-  display: block;
-  margin-top: 7px;
-  font-size: 15px;
-  color: #9a9a9a;
-}
-
-.day-cell.is-selected {
-  background: white;
+.calendar-widget .fc-day-today .fc-daygrid-day-number {
   color: #050505;
+  border-radius: 18px;
+  background: #fff;
   box-shadow: var(--shadow);
 }
 
-.day-cell.is-selected small::after {
+.calendar-widget .fc-day-today .fc-daygrid-day-number::after {
   content: "";
-  display: block;
+  position: absolute;
   width: 40px;
   height: 7px;
-  margin: 8px auto 0;
+  margin-top: 56px;
   border-radius: 99px;
   background: var(--accent);
 }
 
-.day-cell.has-event::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #c9c9c6;
-  transform: translateX(-50%);
+.calendar-widget .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
+  color: #d1d1cf;
 }
 
-.day-cell.is-today strong {
-  color: var(--accent);
+.calendar-widget .fc-daygrid-dot-event {
+  justify-content: center;
+  color: var(--ink);
+}
+
+.calendar-widget .fc-event {
+  border-radius: 5px;
+  font-weight: 700;
+}
+
+.calendar-widget .fc-event.event-reminder {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.calendar-widget .fc-timegrid-axis,
+.calendar-widget .fc-timegrid-slot-label {
+  color: var(--muted);
+}
+
+.calendar-widget .fc-list {
+  border: 0;
+}
+
+.calendar-widget .fc-list-day-cushion {
+  background: #f0f0ed;
+}
+
+.calendar-widget .fc-multimonth {
+  border: 0;
+}
+
+.calendar-widget .fc-multimonth-month {
+  border-radius: var(--radius);
+  background: #fff;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.calendar-widget .fc-multimonth-title {
+  padding: 10px 0;
+  font-size: 20px;
+  font-weight: 900;
 }
 
 .lunar-strip {
@@ -558,8 +614,7 @@ button {
   }
 
   .view-tabs,
-  .week-row,
-  .month-grid,
+  .calendar-widget,
   .lunar-strip {
     margin-left: 12px;
     margin-right: 12px;
@@ -567,12 +622,8 @@ button {
     padding-right: 0;
   }
 
-  .day-cell {
+  .calendar-widget .fc-daygrid-day-frame {
     min-height: 74px;
-  }
-
-  .day-cell small {
-    font-size: 12px;
   }
 
   .voice-float {

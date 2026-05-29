@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Voice Calendar</title>
     <link rel="stylesheet" href="/static/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.20/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.20/locales-all.global.min.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#calendar-title">跳到日历</a>
@@ -53,26 +55,16 @@
           <div id="hot-list" class="hot-list" aria-live="polite"></div>
         </aside>
 
-        <section class="calendar-panel" aria-labelledby="month-title">
+        <section class="calendar-panel" aria-labelledby="calendar-title">
           <div class="view-tabs" role="tablist" aria-label="日历视图">
-            <button type="button" role="tab">年</button>
-            <button type="button" role="tab" aria-selected="true">月</button>
-            <button type="button" role="tab">周</button>
-            <button type="button" role="tab">日</button>
-            <button type="button" role="tab">日程</button>
+            <button type="button" role="tab" data-view="multiMonthYear">年</button>
+            <button type="button" role="tab" data-view="dayGridMonth" aria-selected="true">月</button>
+            <button type="button" role="tab" data-view="timeGridWeek">周</button>
+            <button type="button" role="tab" data-view="timeGridDay">日</button>
+            <button type="button" role="tab" data-view="listMonth">日程</button>
           </div>
 
-          <div class="week-row" aria-hidden="true">
-            <span>日</span>
-            <span>一</span>
-            <span>二</span>
-            <span>三</span>
-            <span>四</span>
-            <span>五</span>
-            <span>六</span>
-          </div>
-
-          <div id="month-grid" class="month-grid" role="grid" aria-label="2026 年 5 月"></div>
+          <div id="calendar" class="calendar-widget" aria-label="日历"></div>
 
           <div class="lunar-strip">
             <span>四月十三 丙午年 [马] 癸巳月 癸卯日</span>

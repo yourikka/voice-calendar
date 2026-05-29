@@ -6,8 +6,9 @@ def test_frontend_index_and_static_assets(client: TestClient) -> None:
 
     assert index.status_code == 200
     assert "Voice Calendar" in index.text
-    assert 'id="month-grid"' in index.text
+    assert 'id="calendar"' in index.text
     assert 'id="voice-button"' in index.text
+    assert "fullcalendar" in index.text.lower()
 
     css = client.get("/static/app.css")
     js = client.get("/static/app.js")

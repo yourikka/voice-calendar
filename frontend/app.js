@@ -2,21 +2,12 @@
   "use strict";
 
   const state = {
-    year: 2026,
-    month: 4,
-    selectedDay: 29,
+    selectedDate: "2026-05-29",
     timezone: "Asia/Shanghai",
     events: [],
+    calendar: null,
   };
 
-  const lunarLabels = [
-    "", "", "", "十七", "青年节", "立夏", "二十", "廿一", "廿二", "廿三",
-    "母亲节", "廿五", "廿六", "廿七", "廿八", "廿九", "三十", "四月",
-    "初二", "初三", "初四", "小满", "初六", "初七", "初八", "初九",
-    "初十", "十一", "十二", "十三", "十四", "十五"
-  ];
-
-  const monthGrid = document.querySelector("#month-grid");
   const hotList = document.querySelector("#hot-list");
   const agendaList = document.querySelector("#agenda-list");
   const agendaCount = document.querySelector("#agenda-count");
@@ -29,47 +20,92 @@
   const refreshButton = document.querySelector("#refresh-button");
   const hotRefresh = document.querySelector("#hot-refresh");
   const quickAdd = document.querySelector("#quick-add");
+  const viewTabs = document.querySelector(".view-tabs");
+  const calendarElement = document.querySelector("#calendar");
 
-  function isoDate(day) {
-    return `2026-05-${String(day).padStart(2, "0")}`;
+  function initCalendar() {
+    if (!window.FullCalendar) {
+      assistantReply.textContent = "日历组件加载失败，请检查网络。";
+      return;
+    }
+
+    state.calendar = new window.FullCalendar.Calendar(calendarElement, {
+      locale: "zh-cn",
+      timeZone: "Asia/Shanghai",
+      initialDate: state.selectedDate,
+      initialView: "dayGridMonth",
+      headerToolbar: false,
+      height: "auto",
+      firstDay: 0,
+      navLinks: true,
+      nowIndicator: true,
+      dayMaxEvents: 3,
+      selectable: true,
+      allDaySlot: false,
+      dayCellContent(info) {
+        return { html: `<span>${info.date.getDate()}</span>` };
+      },
+      slotMinTime: "07:00:00",
+      slotMaxTime: "23:00:00",
+      views: {
+        multiMonthYear: {
+          type: "multiMonth",
+          duration: { years: 1 },
+          multiMonthMaxColumns: 3,
+        },
+        listMonth: {
+          buttonText: "日程",
+        },
+      },
+      datesSet(info) {
+        updateHeading(info.view.currentStart);
+        updateActiveTab(info.view.type);
+        loadEventsForRange(info.startStr, info.endStr);
+      },
+      dateClick(info) {
+        state.selectedDate = info.dateStr.slice(0, 10);
+        renderAgenda();
+      },
+      eventClick(info) {
+        state.selectedDate = info.event.startStr.slice(0, 10);
+        renderAgenda();
+      },
+    });
+
+    state.calendar.render();
   }
 
-  function dayRange(day) {
-    const date = isoDate(day);
+  function updateHeading(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const heading = document.querySelector("#calendar-title");
+    heading.innerHTML = `<span>${year}</span><i>/</i><strong>${month}</strong>`;
+  }
+
+  function updateActiveTab(viewType) {
+    viewTabs.querySelectorAll("button").forEach((button) => {
+      button.setAttribute("aria-selected", String(button.dataset.view === viewType));
+    });
+  }
+
+  function toCalendarEvent(event) {
     return {
-      start: `${date}T00:00:00+08:00`,
-      end: day === 31 ? "2026-06-01T00:00:00+08:00" : `${isoDate(day + 1)}T00:00:00+08:00`,
+      id: event.id,
+      title: event.title,
+      start: event.start_at,
+      end: event.end_at,
+      allDay: event.type === "reminder" && !event.end_at,
+      classNames: [`event-${event.type}`],
+      extendedProps: event,
     };
   }
 
-  function renderCalendar() {
-    const firstWeekday = new Date("2026-05-01T00:00:00+08:00").getDay();
-    const eventDays = new Set(
-      state.events.map((event) => new Date(event.start_at).getDate())
-    );
-    const cells = [];
-    for (let index = 0; index < firstWeekday; index += 1) {
-      cells.push("<div></div>");
-    }
-    for (let day = 1; day <= 31; day += 1) {
-      const classes = ["day-cell"];
-      if (day === state.selectedDay) classes.push("is-selected");
-      if (day === 29) classes.push("is-today");
-      if (eventDays.has(day)) classes.push("has-event");
-      cells.push(`
-        <button class="${classes.join(" ")}" type="button" role="gridcell" data-day="${day}" aria-label="5月${day}日">
-          <strong>${day}</strong>
-          <small>${lunarLabels[day] || ""}</small>
-        </button>
-      `);
-    }
-    monthGrid.innerHTML = cells.join("");
+  function selectedDayEvents() {
+    return state.events.filter((event) => event.start_at.slice(0, 10) === state.selectedDate);
   }
 
   function renderAgenda() {
-    const dayEvents = state.events.filter((event) => {
-      return new Date(event.start_at).getDate() === state.selectedDay;
-    });
+    const dayEvents = selectedDayEvents();
     agendaCount.textContent = String(dayEvents.length);
     if (!dayEvents.length) {
       agendaList.innerHTML = `
@@ -82,19 +118,10 @@
       `;
       return;
     }
+
     agendaList.innerHTML = dayEvents.map((event) => {
-      const start = new Date(event.start_at).toLocaleTimeString("zh-CN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
-      const end = event.end_at
-        ? new Date(event.end_at).toLocaleTimeString("zh-CN", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          })
-        : "";
+      const start = formatTime(event.start_at);
+      const end = event.end_at ? formatTime(event.end_at) : "";
       return `
         <article class="agenda-item">
           <b>${escapeHtml(event.title)}</b>
@@ -121,16 +148,19 @@
     `).join("");
   }
 
-  async function loadEvents() {
-    const range = {
-      start: "2026-05-01T00:00:00+08:00",
-      end: "2026-06-01T00:00:00+08:00",
-    };
-    const response = await fetch(`/api/events?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`);
+  async function loadEventsForRange(start, end) {
+    const response = await fetch(`/api/events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
     const data = await response.json();
     state.events = data.items || [];
-    renderCalendar();
+    state.calendar.removeAllEvents();
+    state.calendar.addEventSource(state.events.map(toCalendarEvent));
     renderAgenda();
+  }
+
+  async function loadCurrentEvents() {
+    if (!state.calendar) return;
+    const view = state.calendar.view;
+    await loadEventsForRange(toApiDateTime(view.activeStart), toApiDateTime(view.activeEnd));
   }
 
   async function loadHotTopics(force) {
@@ -138,10 +168,10 @@
       await fetch("/api/news/hot-topics/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: "2026-05-29", timezone: state.timezone }),
+        body: JSON.stringify({ date: state.selectedDate, timezone: state.timezone }),
       });
     }
-    const response = await fetch("/api/calendar/hot-topics?date=2026-05-29&timezone=Asia/Shanghai&limit=5");
+    const response = await fetch(`/api/calendar/hot-topics?date=${state.selectedDate}&timezone=Asia/Shanghai&limit=5`);
     const data = await response.json();
     renderHotTopics(data.items || []);
   }
@@ -161,7 +191,7 @@
     const data = await response.json();
     assistantReply.textContent = data.reply_text || "已处理。";
     commandInput.value = "";
-    await Promise.all([loadEvents(), loadHotTopics(false)]);
+    await Promise.all([loadCurrentEvents(), loadHotTopics(false)]);
   }
 
   function setupVoice() {
@@ -202,6 +232,24 @@
     voiceButton.addEventListener("click", () => recognition.start());
   }
 
+  function formatTime(value) {
+    return new Date(value).toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+
+  function toApiDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hour = String(date.getHours()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    const second = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+  }
+
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, (char) => ({
       "&": "&amp;",
@@ -212,12 +260,10 @@
     }[char]));
   }
 
-  monthGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-day]");
-    if (!button) return;
-    state.selectedDay = Number(button.dataset.day);
-    renderCalendar();
-    renderAgenda();
+  viewTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-view]");
+    if (!button || !state.calendar) return;
+    state.calendar.changeView(button.dataset.view);
   });
 
   commandForm.addEventListener("submit", (event) => {
@@ -225,7 +271,7 @@
     sendCommand(commandInput.value);
   });
 
-  refreshButton.addEventListener("click", () => Promise.all([loadEvents(), loadHotTopics(true)]));
+  refreshButton.addEventListener("click", () => Promise.all([loadCurrentEvents(), loadHotTopics(true)]));
   hotRefresh.addEventListener("click", () => loadHotTopics(true));
   quickAdd.addEventListener("click", () => {
     commandInput.value = "明天下午三点提醒我开项目会";
@@ -233,8 +279,8 @@
   });
 
   setupVoice();
-  renderCalendar();
-  Promise.all([loadEvents(), loadHotTopics(false)]).catch(() => {
+  initCalendar();
+  loadHotTopics(false).catch(() => {
     assistantReply.textContent = "后端暂不可用，请确认 API 已启动。";
   });
 })();
