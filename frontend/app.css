@@ -564,6 +564,30 @@ button {
   color: #151515;
 }
 
+.calendar-widget .fc-multimonth .fc-daygrid-event-harness {
+  margin-top: 1px;
+}
+
+.calendar-widget .fc-multimonth .fc-daygrid-event {
+  width: 18px;
+  min-height: 6px;
+  margin: 0 auto;
+  border-radius: 999px;
+}
+
+.calendar-widget .fc-multimonth .fc-event-main {
+  min-height: 6px;
+}
+
+.calendar-widget .fc-multimonth .fc-event-main-frame {
+  min-height: 6px;
+}
+
+.calendar-widget .fc-multimonth .fc-event-title-container,
+.calendar-widget .fc-multimonth .fc-event-time {
+  display: none;
+}
+
 .calendar-widget .fc-multimonth .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
   visibility: hidden;
 }
