@@ -75,6 +75,10 @@
         loadEventsForRange(info.startStr, info.endStr);
       },
       dateClick(info) {
+        if (info.view.type === "multiMonthYear") {
+          openMonthView(info.dateStr.slice(0, 10));
+          return;
+        }
         state.selectedDate = info.dateStr.slice(0, 10);
         markSelectedDate();
         renderAgenda();
@@ -216,6 +220,12 @@
     calendarElement.querySelectorAll(selector).forEach((cell) => {
       cell.classList.add("is-selected-date");
     });
+  }
+
+  function openMonthView(dateText) {
+    if (!state.calendar) return;
+    state.selectedDate = dateText;
+    state.calendar.changeView("dayGridMonth", dateText);
   }
 
   function gotoMonth(year, month) {
@@ -360,6 +370,15 @@
     const button = event.target.closest("[data-view]");
     if (!button || !state.calendar) return;
     state.calendar.changeView(button.dataset.view);
+  });
+
+  calendarElement.addEventListener("click", (event) => {
+    const title = event.target.closest(".fc-multimonth-title");
+    if (!title || !state.calendar || state.calendar.view.type !== "multiMonthYear") return;
+    const month = title.closest(".fc-multimonth-month");
+    const monthDate = month?.dataset.date;
+    if (!monthDate) return;
+    openMonthView(`${monthDate}-01`);
   });
 
   commandForm.addEventListener("submit", (event) => {

@@ -535,6 +535,7 @@ button {
   font-size: clamp(30px, 2.8vw, 46px);
   font-weight: 900;
   letter-spacing: 0;
+  cursor: pointer;
 }
 
 .calendar-widget .fc-multimonth-month:nth-child(5) .fc-multimonth-title {
