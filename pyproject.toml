@@ -1,0 +1,25 @@
+[project]
+name = "voice-calendar"
+version = "0.1.0"
+description = "Voice-first calendar backend with web and MCP entrypoints."
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115.0",
+  "pydantic>=2.7.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=8.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
