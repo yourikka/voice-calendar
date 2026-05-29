@@ -463,23 +463,27 @@ button {
   box-shadow: var(--shadow);
 }
 
+.calendar-widget .is-selected-date .fc-daygrid-day-frame::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  width: 38px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
 .calendar-widget .is-selected-date .fc-daygrid-day-number {
   color: #050505;
 }
 
-.calendar-widget .fc-day-today.is-selected-date .fc-daygrid-day-number {
-  color: var(--accent);
-}
-
-.calendar-widget .is-selected-date .fc-daygrid-day-number::after {
-  content: "";
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 40px;
-  height: 7px;
-  border-radius: 99px;
-  background: var(--accent);
+.calendar-widget .is-selected-date .fc-daygrid-day-top,
+.calendar-widget .is-selected-date .fc-daygrid-day-events {
+  position: relative;
+  z-index: 1;
 }
 
 .calendar-widget .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
@@ -601,6 +605,10 @@ button {
 .calendar-widget .fc-multimonth .is-selected-date .fc-daygrid-day-frame {
   box-shadow: none;
   background: transparent;
+}
+
+.calendar-widget .fc-multimonth .is-selected-date .fc-daygrid-day-frame::after {
+  display: none;
 }
 
 .calendar-widget .fc-multimonth .is-selected-date .fc-daygrid-day-number {
