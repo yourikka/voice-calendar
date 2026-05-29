@@ -19,6 +19,8 @@ from app.models import (
     HotTopicPanelResponse,
     HotTopicRefreshRequest,
     HotTopicRefreshResponse,
+    MCPToolRequest,
+    MCPToolResponse,
     NewsTodayResponse,
     OperationRead,
     TextCommandRequest,
@@ -28,6 +30,7 @@ from app.models import (
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.command import TextCommandService
+from app.services.mcp import MCPToolService
 from app.services.news import NewsService
 
 
@@ -177,3 +180,15 @@ def get_daily_briefing(
     service: DailyBriefingService = Depends(get_briefing_service),
 ) -> DailyBriefingResponse:
     return service.get_daily_briefing(date=date, timezone_name=timezone)
+
+
+@router.post("/mcp/tools/{tool_name}", response_model=MCPToolResponse)
+def call_mcp_tool(
+    tool_name: str,
+    payload: MCPToolRequest,
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+) -> MCPToolResponse:
+    try:
+        return MCPToolService(conn).call_tool(tool_name, payload.arguments)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="MCP tool not found") from exc

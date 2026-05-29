@@ -176,3 +176,12 @@ class DailyBriefingResponse(BaseModel):
     timezone: str
     sections: list[BriefingSection]
     spoken_summary: str
+
+
+class MCPToolRequest(BaseModel):
+    arguments: dict = Field(default_factory=dict)
+
+
+class MCPToolResponse(BaseModel):
+    tool: str
+    result: dict
