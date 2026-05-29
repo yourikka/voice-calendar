@@ -37,6 +37,8 @@
 
 - 支持语音添加、删除、修改、查看事件
 - 支持语音创建、更新、取消提醒
+- 提供完整 Web 体验，用户可以在网页中通过语音或文本完成所有核心操作
+- 提供 MCP 工具入口，让智能体可以调用同一套日历、提醒、热点和简报能力
 - 支持语音获取当日资讯，并可与当天日程组合成每日简报
 - 支持实时从网络抓取当日热点，并在日历界面展示“今日热点”专栏
 - 准确理解中文自然语言日期、时间、重复规则和提醒规则
@@ -57,6 +59,7 @@
 - 离线大模型本地全量推理
 - 多人共享家庭日历的复杂权限模型
 - 完整新闻客户端、舆情监控平台或自媒体内容生产系统
+- 把日历核心业务直接写死在某个智能体框架或 Codex skill 中
 
 ## 2. 用户研究与真实需求
 
@@ -173,6 +176,10 @@ MVP 必须支持：
 - 生成日程与资讯组合的每日简报
 - 日历界面展示今日热点专栏
 - 后端实时抓取或聚合当天热点数据，并做短期缓存
+- Web 端完整日历工作台
+- Web 端文本输入自然语言指令
+- Web 端语音输入自然语言指令
+- MCP Server 暴露智能体可调用的日历工具
 - 日历数据本地存储
 - 至少一种系统日历同步方案
 
@@ -192,6 +199,7 @@ MVP 必须支持：
 - 自然语言批量操作
 - 资讯来源管理和个性化频道订阅
 - 基于日程地点、行业和兴趣的资讯推荐
+- 多智能体协作，例如会议安排智能体、资讯简报智能体、个人助理智能体
 
 ## 4. 核心使用场景
 
@@ -442,6 +450,60 @@ MVP 可以默认支持“无限重复”和“直到某日期”。
 用户：今天有什么热点？
 系统：今天有 5 条热点。我先说前三条：第一，AI 多模态应用持续升温。第二，国内财经政策发布新动态。第三，本地交通发布晚高峰提示。
 ```
+
+### 4.11 Web 完整体验
+
+用户打开 Web 应用后，应能在一个完整日历工作台中完成核心功能。
+
+Web 必须包含：
+
+- 日历视图：今天、周、月视图
+- 事件列表：按时间展示事件、提醒和重复事件展开结果
+- 今日热点专栏：展示实时热点，不混入日程事件
+- 输入区：支持自然语言文本输入
+- 语音按钮：支持录音、转写、确认和重试
+- 系统回复区：展示系统理解、澄清问题、确认请求和执行结果
+- 操作确认区：删除、修改、冲突保存等高风险操作必须可点击确认
+- 撤销入口：展示最近一次可撤销操作
+
+Web 输入示例：
+
+```text
+用户在输入框输入：明天下午三点提醒我开项目会
+系统展示：识别为创建事件，时间为明天下午 3 点，默认持续 1 小时。需要保存吗？
+```
+
+Web 语音示例：
+
+```text
+用户点击语音按钮并说：今天有什么热点
+系统转写后展示文本，同时在回复区播报前三条热点。
+```
+
+Web 是面向最终用户的完整产品入口。它不能只做调试页面，必须能独立完成日历管理、语音交互、热点查看和每日简报。
+
+### 4.12 智能体 MCP 调用
+
+智能体可以通过 MCP 调用日历能力，用于完成更复杂的个人助理任务。
+
+典型场景：
+
+- 用户直接对智能体说：“帮我看看明天下午有没有空，有空的话安排复盘会”
+- 智能体通过 MCP 查询空闲时间
+- 智能体通过 MCP 创建待确认事件
+- 系统返回需要用户确认的结果
+- 用户确认后，智能体再调用确认执行工具
+
+MCP 工具调用示例：
+
+```text
+Agent
+-> calendar.check_availability
+-> calendar.create_event_draft
+-> calendar.confirm_operation
+```
+
+MCP 是智能体调用层，不是业务核心。MCP 不能直接绕过权限、确认、冲突检测、撤销和操作日志。
 
 ## 5. 语音交互设计
 
@@ -809,7 +871,51 @@ MVP 支持：
   -> TTS 语音播报
 ```
 
+产品形态上分为两个入口，但共享同一套后端能力：
+
+```text
+Web App
+  -> HTTP API
+  -> Application Services
+
+Agent / LLM
+  -> MCP Server
+  -> Application Services
+
+Application Services
+  -> DialogManager / CalendarOrchestrator / NewsService / DailyBriefingService
+  -> CalendarStore / CalendarAdapter / NewsProviderAdapter
+```
+
+设计约束：
+
+- Web App 是用户完整体验入口
+- MCP Server 是智能体工具入口
+- HTTP API 和 MCP 工具必须复用同一套 Application Services
+- 权限、确认、撤销、冲突检测和审计日志必须放在 Application Services 内
+- MCP 只做协议适配，不承载核心业务规则
+
 ### 8.2 模块职责
+
+#### WebApp
+
+职责：
+
+- 展示日历今天、周、月视图
+- 展示事件、提醒、今日热点和每日简报
+- 提供文本自然语言输入
+- 提供语音录入入口
+- 展示 ASR 转写结果和系统理解
+- 承载确认、取消、候选选择和撤销交互
+
+#### HTTP API
+
+职责：
+
+- 为 Web App 提供稳定接口
+- 处理认证、会话和请求校验
+- 暴露事件、语音、文本指令、热点和简报接口
+- 将请求转发到 Application Services
 
 #### VoiceCapture
 
@@ -940,6 +1046,31 @@ MVP 支持：
 - 在抓取失败时返回上次成功缓存
 - 确保热点专栏不写入用户日程事件
 
+#### MCPServer
+
+职责：
+
+- 将日历、提醒、热点和简报能力包装为智能体可调用工具
+- 将 MCP 请求转换为 Application Services 调用
+- 返回结构化结果、候选项、确认状态和可继续操作的 `operation_id`
+- 校验智能体调用权限和用户授权上下文
+- 避免智能体直接执行高风险写操作
+
+MCP 工具建议：
+
+| 工具 | 说明 |
+| --- | --- |
+| `calendar.parse_command` | 解析自然语言指令，返回意图、槽位和缺失信息 |
+| `calendar.create_event_draft` | 创建事件草稿，返回确认文本和冲突信息 |
+| `calendar.confirm_operation` | 确认执行待确认操作 |
+| `calendar.list_events` | 查询指定时间范围内的事件和提醒 |
+| `calendar.update_event_draft` | 创建修改事件草稿 |
+| `calendar.delete_event_draft` | 创建删除事件草稿 |
+| `calendar.check_availability` | 查询空闲时间 |
+| `calendar.undo_last_operation` | 撤销最近一次可撤销操作 |
+| `news.get_today_hot_topics` | 获取当日热点 |
+| `briefing.get_daily_briefing` | 获取日程、提醒和资讯组合简报 |
+
 #### DailyBriefingService
 
 职责：
@@ -953,7 +1084,7 @@ MVP 支持：
 
 MVP 可采用：
 
-- 客户端：Web/PWA 或移动端原生壳
+- 客户端：Web/PWA，MVP 优先 Web
 - 后端：FastAPI / Node.js 均可
 - 数据库：SQLite 起步，后续迁移 PostgreSQL
 - ASR：系统语音 API 或云语音识别
@@ -963,6 +1094,7 @@ MVP 可采用：
 - 同步：先支持本地 ICS 导出或系统日历写入，再扩展 Google/Outlook
 - 资讯：RSS/新闻 API/合规热榜抓取 + 本地短期缓存 + 摘要生成
 - 热点缓存：SQLite/Redis 均可，MVP 可使用 SQLite 表加 TTL 字段
+- MCP：独立 MCP Server 进程或后端内置 MCP 入口，优先复用后端服务层
 
 ## 9. API 规格
 
@@ -1220,6 +1352,131 @@ Content-Type: application/json
   "item_count": 10
 }
 ```
+
+### 9.12 MCP 工具接口规格
+
+MCP Server 对智能体暴露工具，不直接暴露数据库或第三方日历凭据。
+
+#### calendar.list_events
+
+输入：
+
+```json
+{
+  "start": "2026-05-29T00:00:00+08:00",
+  "end": "2026-05-30T00:00:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "calendar_id": "primary"
+}
+```
+
+输出：
+
+```json
+{
+  "items": [
+    {
+      "id": "evt_01HZY...",
+      "title": "项目评审会",
+      "start_at": "2026-05-29T14:00:00+08:00",
+      "end_at": "2026-05-29T15:00:00+08:00"
+    }
+  ]
+}
+```
+
+#### calendar.create_event_draft
+
+输入：
+
+```json
+{
+  "title": "项目复盘会",
+  "start_at": "2026-05-30T15:00:00+08:00",
+  "end_at": "2026-05-30T16:00:00+08:00",
+  "timezone": "Asia/Shanghai",
+  "reminders": [
+    {
+      "method": "notification",
+      "offset_minutes": -10
+    }
+  ]
+}
+```
+
+输出：
+
+```json
+{
+  "operation_id": "op_01HZ...",
+  "state": "awaiting_confirmation",
+  "requires_confirmation": true,
+  "reply_text": "要创建明天下午 3 点到 4 点的项目复盘会，提前 10 分钟提醒。需要保存吗？",
+  "conflicts": []
+}
+```
+
+#### calendar.confirm_operation
+
+输入：
+
+```json
+{
+  "operation_id": "op_01HZ...",
+  "confirmed": true
+}
+```
+
+输出：
+
+```json
+{
+  "state": "completed",
+  "event_id": "evt_01HZY...",
+  "reply_text": "已保存项目复盘会。"
+}
+```
+
+#### news.get_today_hot_topics
+
+输入：
+
+```json
+{
+  "timezone": "Asia/Shanghai",
+  "region": "CN",
+  "categories": ["general", "technology"],
+  "limit": 5,
+  "fresh": false
+}
+```
+
+输出：
+
+```json
+{
+  "date": "2026-05-29",
+  "items": [
+    {
+      "title": "AI 多模态应用持续升温",
+      "summary": "多家产品更新多模态能力，行业关注度持续提升。",
+      "source_name": "示例科技",
+      "source_url": "https://example.com/news/hot-1",
+      "published_at": "2026-05-29T09:20:00+08:00"
+    }
+  ],
+  "spoken_summary": "今天有 5 条热点。我先说前三条。"
+}
+```
+
+MCP 安全规则：
+
+- 写操作默认返回草稿和确认请求
+- 只有 `calendar.confirm_operation` 可以真正提交待确认写操作
+- 删除、修改、冲突保存和重复事件变更必须确认
+- MCP 调用必须带用户授权上下文
+- 工具输出必须包含可读 `reply_text`，方便智能体直接回复用户
+- 工具输出不能泄露第三方 OAuth token、内部同步凭据或完整调试日志
 
 ## 10. 关键业务规则
 
@@ -1531,7 +1788,9 @@ MVP 推荐默认不保存原始音频，只保存转写文本和解析结果。
 交付：
 
 - 事件数据模型
+- Web 日历工作台基础版
 - 文本指令 API
+- Web 文本自然语言输入
 - 规则版意图识别
 - 日期时间解析
 - 创建、查看、删除、修改
@@ -1552,12 +1811,34 @@ MVP 推荐默认不保存原始音频，只保存转写文本和解析结果。
 - ASRService
 - TTS 播报
 - 客户端语音采集
+- Web 语音按钮、转写展示和重试
 - 会话状态管理
 - 语音错误恢复
 - 语音播报当日资讯和每日简报
 - 保留语音播报热点能力，不因日历专栏上线而取消
 
-### 15.3 第三阶段：同步与增强
+### 15.3 第三阶段：MCP 智能体入口
+
+目标：
+
+- 让智能体可以通过 MCP 调用同一套日历和热点能力
+
+交付：
+
+- MCP Server
+- `calendar.list_events`
+- `calendar.create_event_draft`
+- `calendar.confirm_operation`
+- `calendar.update_event_draft`
+- `calendar.delete_event_draft`
+- `calendar.check_availability`
+- `calendar.undo_last_operation`
+- `news.get_today_hot_topics`
+- `briefing.get_daily_briefing`
+- MCP 权限上下文校验
+- MCP 高风险操作确认流程
+
+### 15.4 第四阶段：同步与增强
 
 目标：
 
@@ -1575,7 +1856,7 @@ MVP 推荐默认不保存原始音频，只保存转写文本和解析结果。
 - 日历今日热点专栏
 - 热点手动刷新接口
 
-### 15.4 第四阶段：智能化增强
+### 15.5 第五阶段：智能化增强
 
 目标：
 
@@ -1594,6 +1875,9 @@ MVP 推荐默认不保存原始音频，只保存转写文本和解析结果。
 
 MVP 通过验收必须满足：
 
+- 用户可以在 Web 中查看今天、周、月日历
+- 用户可以在 Web 中通过文本输入完成核心日历操作
+- 用户可以在 Web 中通过语音输入完成核心日历操作
 - 用户可以通过语音创建单次提醒
 - 用户可以通过语音创建单次事件
 - 用户可以通过语音查看今天、明天、本周日程
@@ -1610,6 +1894,9 @@ MVP 通过验收必须满足：
 - 今日热点必须支持实时抓取或手动刷新，并有短期缓存降级
 - 用户可以通过语音获取日程与资讯组合的每日简报
 - 资讯结果必须包含来源名称、发布时间和原文链接
+- MCP Server 必须暴露查询日程、创建事件草稿、确认操作、查空闲、热点和每日简报工具
+- MCP 写操作必须走草稿和确认流程，不能绕过高风险操作确认
+- Web API 和 MCP 工具必须复用同一套服务层逻辑
 - 至少 200 条中文指令回归测试通过
 - 端到端语音响应在普通网络下不超过 3 秒
 
@@ -1704,6 +1991,7 @@ voice-calendar-tool/
     api.md
     nlu-cases.md
     news-sources.md
+    mcp-tools.md
   backend/
     app/
       api/
@@ -1711,6 +1999,7 @@ voice-calendar-tool/
       models/
       adapters/
       nlu/
+      mcp/
       tests/
   frontend/
     src/
@@ -1718,6 +2007,7 @@ voice-calendar-tool/
       components/
       voice/
       calendar/
+      hot-topics/
   datasets/
     nlu-regression.zh-CN.jsonl
     news-fixtures.json
