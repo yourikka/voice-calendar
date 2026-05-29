@@ -99,20 +99,41 @@ button {
   border-radius: 99px;
 }
 
-.month-heading h1 {
+.month-heading {
+  position: relative;
+}
+
+.month-title-button {
+  display: inline-flex;
+  align-items: baseline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+}
+
+.month-title-button:hover strong,
+.month-title-button:focus-visible strong {
+  text-decoration: underline;
+  text-decoration-thickness: 5px;
+  text-underline-offset: 9px;
+}
+
+.month-title-button {
   margin: 0;
   font-size: clamp(42px, 4vw, 68px);
   line-height: 0.95;
   letter-spacing: 0;
+  font-weight: 900;
 }
 
-.month-heading h1 i {
+.month-title-button i {
   color: #a6a6a6;
   font-style: normal;
   margin: 0 3px;
 }
 
-.month-heading h1 strong {
+.month-title-button strong {
   color: var(--accent);
 }
 
@@ -120,6 +141,54 @@ button {
   margin: 6px 0 0;
   color: #aaa;
   font-size: 20px;
+}
+
+.month-picker {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 12px);
+  left: 0;
+  display: grid;
+  grid-template-columns: 92px 72px auto;
+  gap: 10px;
+  align-items: end;
+  width: max-content;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.month-picker[hidden] {
+  display: none;
+}
+
+.month-picker label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.month-picker input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #fafafa;
+  font-weight: 800;
+}
+
+.month-picker button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
 }
 
 .command-bar {
@@ -365,13 +434,21 @@ button {
 }
 
 .calendar-widget .fc-day-today .fc-daygrid-day-number {
-  color: #050505;
-  border-radius: 18px;
+  color: var(--accent);
+}
+
+.calendar-widget .is-selected-date .fc-daygrid-day-frame {
+  position: relative;
+  border-radius: 12px;
   background: #fff;
   box-shadow: var(--shadow);
 }
 
-.calendar-widget .fc-day-today .fc-daygrid-day-number::after {
+.calendar-widget .is-selected-date .fc-daygrid-day-number {
+  color: #050505;
+}
+
+.calendar-widget .is-selected-date .fc-daygrid-day-number::after {
   content: "";
   position: absolute;
   width: 40px;

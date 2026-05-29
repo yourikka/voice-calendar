@@ -17,8 +17,21 @@
           <span></span>
         </div>
         <div class="month-heading">
-          <h1 id="calendar-title"><span>2026</span><i>/</i><strong>05</strong></h1>
+          <button id="month-picker-toggle" class="month-title-button" type="button" aria-haspopup="dialog">
+            <span id="heading-year">2026</span><i>/</i><strong id="heading-month">05</strong>
+          </button>
           <p>默认视图</p>
+          <form id="month-picker" class="month-picker" hidden>
+            <label>
+              年
+              <input id="year-input" type="number" min="1970" max="2100" value="2026" />
+            </label>
+            <label>
+              月
+              <input id="month-input" type="number" min="1" max="12" value="5" />
+            </label>
+            <button type="submit">切换</button>
+          </form>
         </div>
 
         <form class="command-bar" id="command-form">
@@ -74,7 +87,7 @@
 
         <aside class="agenda-panel" aria-labelledby="agenda-title">
           <div class="panel-heading">
-            <p id="agenda-title">今日日程</p>
+            <p id="agenda-title">所选日程</p>
             <span id="agenda-count">0</span>
           </div>
           <div id="agenda-list" class="agenda-list" aria-live="polite"></div>

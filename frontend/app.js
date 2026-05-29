@@ -22,6 +22,12 @@
   const quickAdd = document.querySelector("#quick-add");
   const viewTabs = document.querySelector(".view-tabs");
   const calendarElement = document.querySelector("#calendar");
+  const monthPickerToggle = document.querySelector("#month-picker-toggle");
+  const monthPicker = document.querySelector("#month-picker");
+  const yearInput = document.querySelector("#year-input");
+  const monthInput = document.querySelector("#month-input");
+  const headingYear = document.querySelector("#heading-year");
+  const headingMonth = document.querySelector("#heading-month");
 
   function initCalendar() {
     if (!window.FullCalendar) {
@@ -37,7 +43,7 @@
       headerToolbar: false,
       height: "auto",
       firstDay: 0,
-      navLinks: true,
+      navLinks: false,
       nowIndicator: true,
       dayMaxEvents: 3,
       selectable: true,
@@ -64,10 +70,12 @@
       },
       dateClick(info) {
         state.selectedDate = info.dateStr.slice(0, 10);
+        markSelectedDate();
         renderAgenda();
       },
       eventClick(info) {
         state.selectedDate = info.event.startStr.slice(0, 10);
+        markSelectedDate();
         renderAgenda();
       },
     });
@@ -78,8 +86,10 @@
   function updateHeading(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
-    const heading = document.querySelector("#calendar-title");
-    heading.innerHTML = `<span>${year}</span><i>/</i><strong>${month}</strong>`;
+    headingYear.textContent = String(year);
+    headingMonth.textContent = month;
+    yearInput.value = String(year);
+    monthInput.value = String(Number(month));
   }
 
   function updateActiveTab(viewType) {
@@ -154,7 +164,27 @@
     state.events = data.items || [];
     state.calendar.removeAllEvents();
     state.calendar.addEventSource(state.events.map(toCalendarEvent));
+    markSelectedDate();
     renderAgenda();
+  }
+
+  function markSelectedDate() {
+    if (!state.calendar) return;
+    calendarElement.querySelectorAll(".is-selected-date").forEach((cell) => {
+      cell.classList.remove("is-selected-date");
+    });
+    const selector = `.fc-day[data-date="${state.selectedDate}"]`;
+    calendarElement.querySelectorAll(selector).forEach((cell) => {
+      cell.classList.add("is-selected-date");
+    });
+  }
+
+  function gotoMonth(year, month) {
+    if (!state.calendar) return;
+    const normalizedMonth = String(month).padStart(2, "0");
+    state.selectedDate = `${year}-${normalizedMonth}-01`;
+    state.calendar.gotoDate(state.selectedDate);
+    monthPicker.hidden = true;
   }
 
   async function loadCurrentEvents() {
@@ -276,6 +306,14 @@
   quickAdd.addEventListener("click", () => {
     commandInput.value = "明天下午三点提醒我开项目会";
     commandInput.focus();
+  });
+  monthPickerToggle.addEventListener("click", () => {
+    monthPicker.hidden = !monthPicker.hidden;
+    if (!monthPicker.hidden) yearInput.focus();
+  });
+  monthPicker.addEventListener("submit", (event) => {
+    event.preventDefault();
+    gotoMonth(Number(yearInput.value), Number(monthInput.value));
   });
 
   setupVoice();
