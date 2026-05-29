@@ -6,7 +6,9 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from app.models import EventCreate, Reminder, TextCommandRequest, TextCommandResponse
+from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
+from app.services.news import NewsService
 
 
 WEEKDAY_MAP = {
@@ -125,8 +127,15 @@ def _extract_title_after(text: str, marker: str) -> str:
 
 
 class TextCommandService:
-    def __init__(self, calendar: CalendarService) -> None:
+    def __init__(
+        self,
+        calendar: CalendarService,
+        news: NewsService | None = None,
+        briefing: DailyBriefingService | None = None,
+    ) -> None:
         self.calendar = calendar
+        self.news = news
+        self.briefing = briefing
 
     def handle(self, request: TextCommandRequest) -> TextCommandResponse:
         text = _normalize(request.text)
@@ -134,20 +143,31 @@ class TextCommandService:
         session_id = _session_id(request.session_id)
 
         if "简报" in text:
+            if self.briefing:
+                date = _now(request).date().isoformat()
+                briefing = self.briefing.get_daily_briefing(date=date, timezone_name=request.timezone)
+                reply_text = briefing.spoken_summary
+            else:
+                reply_text = "今日简报功能已进入简报服务处理流程。"
             return TextCommandResponse(
                 session_id=session_id,
                 state="completed",
                 transcript=request.text,
                 intent="get_daily_briefing",
-                reply_text="今日简报功能已进入简报服务处理流程。",
+                reply_text=reply_text,
             )
         if "热点" in text or "新闻" in text or "资讯" in text:
+            if self.news:
+                news = self.news.get_today_news(timezone_name=request.timezone, fresh=False)
+                reply_text = news.spoken_summary
+            else:
+                reply_text = "今日热点功能已进入资讯服务处理流程。"
             return TextCommandResponse(
                 session_id=session_id,
                 state="completed",
                 transcript=request.text,
                 intent="get_today_news",
-                reply_text="今日热点功能已进入资讯服务处理流程。",
+                reply_text=reply_text,
             )
         if text.startswith("撤销") or "撤销刚才" in text:
             result = self.calendar.undo_last_operation()
@@ -322,4 +342,3 @@ class TextCommandService:
             operation_id=operation.id,
             candidates=candidates,
         )
-

@@ -119,3 +119,60 @@ class TextCommandResponse(BaseModel):
     operation_id: str | None = None
     event: EventRead | None = None
     candidates: list[Candidate] = Field(default_factory=list)
+
+
+class NewsItemRead(BaseModel):
+    id: str
+    title: str
+    summary: str
+    category: str
+    region: str
+    source_name: str
+    source_url: str
+    published_at: datetime
+    fetched_at: datetime
+    language: str = "zh-CN"
+    hot_score: float
+
+
+class NewsTodayResponse(BaseModel):
+    date: str
+    timezone: str
+    fresh: bool
+    fetched_at: datetime
+    items: list[NewsItemRead]
+    spoken_summary: str
+
+
+class HotTopicPanelResponse(BaseModel):
+    date: str
+    timezone: str
+    refreshed_at: datetime
+    cache_expires_at: datetime
+    stale: bool
+    items: list[NewsItemRead]
+
+
+class HotTopicRefreshRequest(BaseModel):
+    date: str | None = None
+    timezone: str = "Asia/Shanghai"
+    region: str = "CN"
+    categories: list[str] = Field(default_factory=lambda: ["general", "technology", "finance"])
+
+
+class HotTopicRefreshResponse(BaseModel):
+    status: str
+    refreshed_at: datetime
+    item_count: int
+
+
+class BriefingSection(BaseModel):
+    type: str
+    spoken_summary: str
+
+
+class DailyBriefingResponse(BaseModel):
+    date: str
+    timezone: str
+    sections: list[BriefingSection]
+    spoken_summary: str

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from app.db import get_connection
 from app.models import (
+    DailyBriefingResponse,
     ConfirmOperationRequest,
     ConfirmOperationResponse,
     EventCreate,
@@ -15,13 +16,19 @@ from app.models import (
     EventListResponse,
     EventRead,
     EventUpdate,
+    HotTopicPanelResponse,
+    HotTopicRefreshRequest,
+    HotTopicRefreshResponse,
+    NewsTodayResponse,
     OperationRead,
     TextCommandRequest,
     TextCommandResponse,
     UndoResponse,
 )
+from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.command import TextCommandService
+from app.services.news import NewsService
 
 
 router = APIRouter(prefix="/api")
@@ -31,6 +38,18 @@ def get_calendar_service(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
 ) -> CalendarService:
     return CalendarService(conn)
+
+
+def get_news_service(
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+) -> NewsService:
+    return NewsService(conn)
+
+
+def get_briefing_service(
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+) -> DailyBriefingService:
+    return DailyBriefingService(conn)
 
 
 @router.get("/events", response_model=EventListResponse)
@@ -106,6 +125,55 @@ def confirm_operation(
 @router.post("/text/commands", response_model=TextCommandResponse)
 def handle_text_command(
     payload: TextCommandRequest,
-    service: CalendarService = Depends(get_calendar_service),
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
 ) -> TextCommandResponse:
-    return TextCommandService(service).handle(payload)
+    return TextCommandService(
+        calendar=CalendarService(conn),
+        news=NewsService(conn),
+        briefing=DailyBriefingService(conn),
+    ).handle(payload)
+
+
+@router.get("/news/today", response_model=NewsTodayResponse)
+def get_today_news(
+    category: str | None = None,
+    region: str = "CN",
+    limit: int = 5,
+    timezone: str = "Asia/Shanghai",
+    fresh: bool = False,
+    service: NewsService = Depends(get_news_service),
+) -> NewsTodayResponse:
+    return service.get_today_news(
+        timezone_name=timezone,
+        category=category,
+        region=region,
+        limit=limit,
+        fresh=fresh,
+    )
+
+
+@router.get("/calendar/hot-topics", response_model=HotTopicPanelResponse)
+def get_calendar_hot_topics(
+    date: str,
+    timezone: str = "Asia/Shanghai",
+    limit: int = 5,
+    service: NewsService = Depends(get_news_service),
+) -> HotTopicPanelResponse:
+    return service.get_hot_topic_panel(date=date, timezone_name=timezone, limit=limit)
+
+
+@router.post("/news/hot-topics/refresh", response_model=HotTopicRefreshResponse)
+def refresh_hot_topics(
+    payload: HotTopicRefreshRequest,
+    service: NewsService = Depends(get_news_service),
+) -> HotTopicRefreshResponse:
+    return service.refresh_hot_topics(payload)
+
+
+@router.get("/briefings/daily", response_model=DailyBriefingResponse)
+def get_daily_briefing(
+    date: str,
+    timezone: str = "Asia/Shanghai",
+    service: DailyBriefingService = Depends(get_briefing_service),
+) -> DailyBriefingResponse:
+    return service.get_daily_briefing(date=date, timezone_name=timezone)
