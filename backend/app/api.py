@@ -8,15 +8,20 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from app.db import get_connection
 from app.models import (
+    ConfirmOperationRequest,
+    ConfirmOperationResponse,
     EventCreate,
     EventCreateResponse,
     EventListResponse,
     EventRead,
     EventUpdate,
     OperationRead,
+    TextCommandRequest,
+    TextCommandResponse,
     UndoResponse,
 )
 from app.services.calendar import CalendarService
+from app.services.command import TextCommandService
 
 
 router = APIRouter(prefix="/api")
@@ -85,3 +90,22 @@ def undo_last_operation(
     service: CalendarService = Depends(get_calendar_service),
 ) -> UndoResponse:
     return service.undo_last_operation()
+
+
+@router.post("/operations/confirm", response_model=ConfirmOperationResponse)
+def confirm_operation(
+    payload: ConfirmOperationRequest,
+    service: CalendarService = Depends(get_calendar_service),
+) -> ConfirmOperationResponse:
+    try:
+        return service.confirm_operation(payload.operation_id, payload.confirmed)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Operation not found") from exc
+
+
+@router.post("/text/commands", response_model=TextCommandResponse)
+def handle_text_command(
+    payload: TextCommandRequest,
+    service: CalendarService = Depends(get_calendar_service),
+) -> TextCommandResponse:
+    return TextCommandService(service).handle(payload)

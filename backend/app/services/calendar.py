@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.models import (
+    Candidate,
     Conflict,
+    ConfirmOperationResponse,
     EventCreate,
     EventCreateResponse,
     EventRead,
@@ -193,6 +195,86 @@ class CalendarService:
                 None,
             )
 
+    def create_delete_draft(self, event_id: str) -> OperationRead:
+        before = self.get_event(event_id)
+        return self._log_operation(
+            "delete_event",
+            event_id,
+            _event_to_dict(before),
+            None,
+            state="awaiting_confirmation",
+        )
+
+    def confirm_operation(self, operation_id: str, confirmed: bool) -> ConfirmOperationResponse:
+        row = self.conn.execute(
+            "SELECT * FROM operation_logs WHERE id = ?",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(operation_id)
+        if row["state"] != "awaiting_confirmation":
+            return ConfirmOperationResponse(
+                state=row["state"],
+                reply_text="该操作不在待确认状态。",
+            )
+
+        if not confirmed:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE operation_logs SET state = 'cancelled' WHERE id = ?",
+                    (operation_id,),
+                )
+            return ConfirmOperationResponse(state="cancelled", reply_text="已取消操作。")
+
+        operation = row["operation"]
+        target_event_id = row["target_event_id"]
+        event: EventRead | None = None
+        with self.conn:
+            if operation == "delete_event" and target_event_id:
+                self.conn.execute(
+                    "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
+                    (_utc_now().isoformat(), _utc_now().isoformat(), target_event_id),
+                )
+            self.conn.execute(
+                "UPDATE operation_logs SET state = 'completed' WHERE id = ?",
+                (operation_id,),
+            )
+        return ConfirmOperationResponse(
+            state="completed",
+            event=event,
+            reply_text="已执行操作。",
+        )
+
+    def find_events_by_title(
+        self,
+        title_keyword: str,
+        start: datetime,
+        end: datetime,
+        calendar_id: str = "primary",
+    ) -> list[Candidate]:
+        rows = self.conn.execute(
+            """
+            SELECT id, title, start_at, end_at FROM events
+            WHERE calendar_id = ?
+              AND deleted_at IS NULL
+              AND status = 'confirmed'
+              AND start_at < ?
+              AND COALESCE(end_at, start_at) >= ?
+              AND title LIKE ?
+            ORDER BY start_at ASC
+            """,
+            (calendar_id, end.isoformat(), start.isoformat(), f"%{title_keyword}%"),
+        ).fetchall()
+        return [
+            Candidate(
+                id=row["id"],
+                title=row["title"],
+                start_at=datetime.fromisoformat(row["start_at"]),
+                end_at=datetime.fromisoformat(row["end_at"]) if row["end_at"] else None,
+            )
+            for row in rows
+        ]
+
     def undo_last_operation(self) -> UndoResponse:
         row = self.conn.execute(
             """
@@ -270,6 +352,7 @@ class CalendarService:
         target_event_id: str | None,
         before: dict | None,
         after: dict | None,
+        state: str = "completed",
     ) -> OperationRead:
         now = _utc_now()
         operation_id = _new_id("op")
@@ -287,7 +370,7 @@ class CalendarService:
                 target_event_id,
                 _dump(before) if before else None,
                 _dump(after) if after else None,
-                "completed",
+                state,
                 now.isoformat(),
                 undo_expires_at.isoformat(),
             ),
@@ -296,7 +379,7 @@ class CalendarService:
             id=operation_id,
             operation=operation,
             target_event_id=target_event_id,
-            state="completed",
+            state=state,
             created_at=now,
             undo_expires_at=undo_expires_at,
         )
@@ -329,4 +412,3 @@ class CalendarService:
                 data["id"],
             ),
         )
-

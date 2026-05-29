@@ -83,3 +83,39 @@ class UndoResponse(BaseModel):
     event: EventRead | None = None
     reply_text: str
 
+
+class ConfirmOperationRequest(BaseModel):
+    operation_id: str
+    confirmed: bool = True
+
+
+class ConfirmOperationResponse(BaseModel):
+    state: str
+    event: EventRead | None = None
+    reply_text: str
+
+
+class Candidate(BaseModel):
+    id: str
+    title: str
+    start_at: datetime
+    end_at: datetime | None = None
+
+
+class TextCommandRequest(BaseModel):
+    text: str = Field(min_length=1)
+    timezone: str = "Asia/Shanghai"
+    session_id: str | None = None
+    now: datetime | None = None
+
+
+class TextCommandResponse(BaseModel):
+    session_id: str
+    state: str
+    transcript: str
+    intent: str
+    reply_text: str
+    requires_user_input: bool = False
+    operation_id: str | None = None
+    event: EventRead | None = None
+    candidates: list[Candidate] = Field(default_factory=list)
