@@ -33,6 +33,76 @@
   const monthInput = document.querySelector("#month-input");
   const headingYear = document.querySelector("#heading-year");
   const headingMonth = document.querySelector("#heading-month");
+  const headingDivider = monthPickerToggle.querySelector("i");
+  const yearLegend = document.querySelector("#year-legend");
+  const yearLegendLeft = document.querySelector("#year-legend-left");
+  const yearLegendRight = document.querySelector("#year-legend-right");
+  const lunarSummary = document.querySelector("#lunar-summary");
+
+  const monthSpecialDays = {
+    "2026-05-01": { label: "劳动节", badge: "休" },
+    "2026-05-02": { badge: "休" },
+    "2026-05-03": { badge: "休" },
+    "2026-05-04": { label: "青年节", dot: true, badge: "休" },
+    "2026-05-05": { label: "立夏", badge: "休" },
+    "2026-05-09": { badge: "班" },
+    "2026-05-10": { label: "母亲节" },
+    "2026-05-13": { dot: true },
+    "2026-05-14": { dot: true },
+    "2026-05-17": { label: "四月", dot: true },
+    "2026-05-18": { dot: true },
+    "2026-05-21": { label: "小满" },
+    "2026-05-22": { dot: true },
+    "2026-05-27": { dot: true },
+  };
+
+  const lunarDayLabels = {
+    1: "初一",
+    2: "初二",
+    3: "初三",
+    4: "初四",
+    5: "初五",
+    6: "初六",
+    7: "初七",
+    8: "初八",
+    9: "初九",
+    10: "初十",
+    11: "十一",
+    12: "十二",
+    13: "十三",
+    14: "十四",
+    15: "十五",
+    16: "十六",
+    17: "十七",
+    18: "十八",
+    19: "十九",
+    20: "二十",
+    21: "廿一",
+    22: "廿二",
+    23: "廿三",
+    24: "廿四",
+    25: "廿五",
+    26: "廿六",
+    27: "廿七",
+    28: "廿八",
+    29: "廿九",
+    30: "三十",
+  };
+
+  const zodiacByBranch = {
+    "子": "鼠",
+    "丑": "牛",
+    "寅": "虎",
+    "卯": "兔",
+    "辰": "龙",
+    "巳": "蛇",
+    "午": "马",
+    "未": "羊",
+    "申": "猴",
+    "酉": "鸡",
+    "戌": "狗",
+    "亥": "猪",
+  };
 
   function initCalendar() {
     if (!window.FullCalendar) {
@@ -54,7 +124,18 @@
       selectable: true,
       allDaySlot: false,
       dayCellContent(info) {
-        return { html: `<span>${info.date.getDate()}</span>` };
+        return info.view.type === "multiMonthYear"
+          ? { html: `${info.date.getDate()}` }
+          : { html: `<span>${info.date.getDate()}</span>` };
+      },
+      dayCellDidMount(info) {
+        decorateDayCell(info);
+      },
+      dayHeaderContent(info) {
+        if (info.view.type === "dayGridMonth" || info.view.type === "multiMonthYear") {
+          return info.text.replace(/^周/, "");
+        }
+        return info.text;
       },
       slotMinTime: "07:00:00",
       slotMaxTime: "23:00:00",
@@ -70,7 +151,7 @@
         },
       },
       datesSet(info) {
-        updateHeading(info.view.currentStart);
+        syncViewChrome(info.view.type, info.view.currentStart);
         updateActiveTab(info.view.type);
         loadEventsForRange(info.startStr, info.endStr);
       },
@@ -93,13 +174,126 @@
     state.calendar.render();
   }
 
-  function updateHeading(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    headingYear.textContent = String(year);
-    headingMonth.textContent = month;
-    yearInput.value = String(year);
-    monthInput.value = String(Number(month));
+  function getShanghaiDateParts(date) {
+    const shifted = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+    return {
+      year: shifted.getUTCFullYear(),
+      month: shifted.getUTCMonth() + 1,
+      day: shifted.getUTCDate(),
+    };
+  }
+
+  function formatDateKey(date) {
+    const parts = getShanghaiDateParts(date);
+    return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  }
+
+  function getChineseCalendarInfo(dateKey) {
+    const date = new Date(`${dateKey}T12:00:00+08:00`);
+    const formatted = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }).format(date);
+    const match = formatted.match(/^(\d+)(.+?)年(.+?)(\d+)$/);
+    if (!match) {
+      return {
+        cyclicalYear: "丙午",
+        monthLabel: "四月",
+        dayLabel: "十三",
+        zodiac: "马",
+      };
+    }
+    const cyclicalYear = match[2];
+    const monthLabel = match[3];
+    const dayLabel = lunarDayLabels[Number(match[4])] || match[4];
+    const zodiac = zodiacByBranch[cyclicalYear.slice(-1)] || "马";
+    return { cyclicalYear, monthLabel, dayLabel, zodiac };
+  }
+
+  function getMonthCellMeta(dateKey) {
+    const lunar = getChineseCalendarInfo(dateKey);
+    const special = monthSpecialDays[dateKey] || {};
+    return {
+      badge: special.badge || "",
+      dot: Boolean(special.dot),
+      isFestival: Boolean(special.label),
+      label: special.label || lunar.dayLabel,
+    };
+  }
+
+  function syncViewChrome(viewType, date) {
+    updateHeading(viewType, date);
+    updateYearLegend(viewType);
+    decorateYearView();
+    updateLunarSummary();
+    document.body.dataset.calendarView = viewType;
+  }
+
+  function updateHeading(viewType, date) {
+    const { year, month } = getShanghaiDateParts(date);
+    const yearText = String(year);
+    const monthText = String(month).padStart(2, "0");
+    if (viewType === "multiMonthYear") {
+      headingYear.textContent = yearText.slice(0, 2);
+      headingMonth.textContent = yearText.slice(2);
+      headingDivider.hidden = true;
+    } else {
+      headingYear.textContent = yearText;
+      headingMonth.textContent = monthText;
+      headingDivider.hidden = false;
+      headingDivider.textContent = "/";
+    }
+    yearInput.value = yearText;
+    monthInput.value = String(Number(monthText));
+  }
+
+  function updateYearLegend(viewType) {
+    const lunar = getChineseCalendarInfo(state.selectedDate);
+    yearLegend.hidden = viewType !== "multiMonthYear";
+    yearLegendLeft.textContent = `一 ${lunar.cyclicalYear}${lunar.zodiac}年`;
+    yearLegendRight.textContent = "一 农历初一";
+  }
+
+  function updateLunarSummary() {
+    const lunar = getChineseCalendarInfo(state.selectedDate);
+    lunarSummary.textContent = `${lunar.monthLabel}${lunar.dayLabel} ${lunar.cyclicalYear}年 [${lunar.zodiac}]`;
+  }
+
+  function decorateDayCell(info) {
+    const frame = info.el.querySelector(".fc-daygrid-day-frame");
+    if (!frame) return;
+    frame.querySelectorAll(".month-cell-meta, .month-cell-status").forEach((node) => node.remove());
+    if (info.view.type !== "dayGridMonth" || info.isOther) return;
+    const meta = getMonthCellMeta(formatDateKey(info.date));
+    if (meta.badge) {
+      const status = document.createElement("span");
+      status.className = `month-cell-status ${meta.badge === "班" ? "is-work" : "is-rest"}`;
+      status.textContent = meta.badge;
+      frame.append(status);
+    }
+    const detail = document.createElement("div");
+    detail.className = `month-cell-meta ${meta.isFestival ? "is-festival" : ""}`;
+    detail.innerHTML = `
+      <span class="month-cell-text">${meta.label}</span>
+      ${meta.dot ? '<span class="month-cell-dot" aria-hidden="true"></span>' : ""}
+    `;
+    frame.insertBefore(detail, frame.querySelector(".fc-daygrid-day-events"));
+  }
+
+  function decorateYearView() {
+    requestAnimationFrame(() => {
+      if (!state.calendar || state.calendar.view.type !== "multiMonthYear") return;
+      const currentMonth = state.selectedDate.slice(5, 7);
+      calendarElement.querySelectorAll(".fc-multimonth-month").forEach((monthElement) => {
+        const title = monthElement.querySelector(".fc-multimonth-title");
+        const monthDate = monthElement.dataset.date;
+        if (!title || !monthDate) return;
+        const monthText = monthDate.slice(5, 7);
+        title.dataset.month = monthText;
+        monthElement.classList.toggle("is-current-month", monthText === currentMonth);
+      });
+    });
   }
 
   function updateActiveTab(viewType) {
@@ -220,6 +414,7 @@
     calendarElement.querySelectorAll(selector).forEach((cell) => {
       cell.classList.add("is-selected-date");
     });
+    updateLunarSummary();
   }
 
   function openMonthView(dateText) {
