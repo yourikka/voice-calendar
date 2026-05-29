@@ -76,8 +76,8 @@ def initialize_database(settings: Settings | None = None) -> None:
     Database(settings).initialize()
 
 
-def get_connection(settings: Settings | None = None) -> Iterator[sqlite3.Connection]:
-    db = Database(settings)
+def get_connection() -> Iterator[sqlite3.Connection]:
+    db = Database()
     conn = db.connect()
     try:
         yield conn
@@ -89,4 +89,3 @@ def reset_database(path: Path) -> None:
     if path.exists():
         path.unlink()
     Database(Settings(database_path=path)).initialize()
-
