@@ -53,54 +53,8 @@
   const yearLegendLeft = document.querySelector("#year-legend-left");
   const yearLegendRight = document.querySelector("#year-legend-right");
   const lunarSummary = document.querySelector("#lunar-summary");
-
-  const lunarDayLabels = {
-    1: "初一",
-    2: "初二",
-    3: "初三",
-    4: "初四",
-    5: "初五",
-    6: "初六",
-    7: "初七",
-    8: "初八",
-    9: "初九",
-    10: "初十",
-    11: "十一",
-    12: "十二",
-    13: "十三",
-    14: "十四",
-    15: "十五",
-    16: "十六",
-    17: "十七",
-    18: "十八",
-    19: "十九",
-    20: "二十",
-    21: "廿一",
-    22: "廿二",
-    23: "廿三",
-    24: "廿四",
-    25: "廿五",
-    26: "廿六",
-    27: "廿七",
-    28: "廿八",
-    29: "廿九",
-    30: "三十",
-  };
-
-  const zodiacByBranch = {
-    "子": "鼠",
-    "丑": "牛",
-    "寅": "虎",
-    "卯": "兔",
-    "辰": "龙",
-    "巳": "蛇",
-    "午": "马",
-    "未": "羊",
-    "申": "猴",
-    "酉": "鸡",
-    "戌": "狗",
-    "亥": "猪",
-  };
+  const api = window.voiceCalendarApi;
+  const dateUtils = window.voiceCalendarDateUtils;
 
   function initCalendar() {
     if (!window.FullCalendar) {
@@ -183,47 +137,10 @@
     state.calendar.render();
   }
 
-  function getShanghaiDateParts(date) {
-    const shifted = new Date(date.getTime() + (8 * 60 * 60 * 1000));
-    return {
-      year: shifted.getUTCFullYear(),
-      month: shifted.getUTCMonth() + 1,
-      day: shifted.getUTCDate(),
-    };
-  }
-
-  function formatDateKey(date) {
-    const parts = getShanghaiDateParts(date);
-    return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
-  }
-
-  function getChineseCalendarInfo(dateKey) {
-    const date = new Date(`${dateKey}T12:00:00+08:00`);
-    const formatted = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }).format(date);
-    const match = formatted.match(/^(\d+)(.+?)年(.+?)(\d+)$/);
-    if (!match) {
-      return {
-        cyclicalYear: "丙午",
-        monthLabel: "四月",
-        dayLabel: "十三",
-        zodiac: "马",
-      };
-    }
-    const cyclicalYear = match[2];
-    const monthLabel = match[3];
-    const dayLabel = lunarDayLabels[Number(match[4])] || match[4];
-    const zodiac = zodiacByBranch[cyclicalYear.slice(-1)] || "马";
-    return { cyclicalYear, monthLabel, dayLabel, zodiac };
-  }
-
   function getMonthCellMeta(dateKey) {
-    const lunar = getChineseCalendarInfo(dateKey);
+    const lunar = dateUtils.getChineseCalendarInfo(dateKey);
     const remoteMeta = state.dayMetaByDate[dateKey] || {};
-    const customFestival = getCustomFestival(dateKey);
+    const customFestival = dateUtils.getCustomFestival(dateKey);
     return {
       badge: remoteMeta.is_holiday ? "休" : (remoteMeta.is_adjusted_workday ? "班" : ""),
       dot: hasEventsOnDate(dateKey),
@@ -235,28 +152,8 @@
     };
   }
 
-  function getCustomFestival(dateKey) {
-    const [yearText, monthText, dayText] = dateKey.split("-");
-    const year = Number(yearText);
-    const month = Number(monthText);
-    const day = Number(dayText);
-    if (month === 5 && day === 4) return { label: "青年节" };
-    if (month === 5 && dateKey === getNthWeekdayOfMonth(year, 5, 0, 2)) {
-      return { label: "母亲节" };
-    }
-    return { label: "" };
-  }
-
   function hasEventsOnDate(dateKey) {
     return state.events.some((event) => event.start_at.slice(0, 10) === dateKey);
-  }
-
-  function getNthWeekdayOfMonth(year, month, weekday, nth) {
-    const first = new Date(`${year}-${String(month).padStart(2, "0")}-01T12:00:00+08:00`);
-    const firstWeekday = first.getUTCDay();
-    const offset = (weekday - firstWeekday + 7) % 7;
-    const day = 1 + offset + ((nth - 1) * 7);
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
   function syncViewChrome(viewType, date) {
@@ -268,7 +165,7 @@
   }
 
   function updateHeading(viewType, date) {
-    const { year, month } = getShanghaiDateParts(date);
+    const { year, month } = dateUtils.getShanghaiDateParts(date);
     const yearText = String(year);
     const monthText = String(month).padStart(2, "0");
     if (viewType === "multiMonthYear") {
@@ -286,21 +183,21 @@
   }
 
   function updateYearLegend(viewType) {
-    const lunar = getChineseCalendarInfo(state.selectedDate);
+    const lunar = dateUtils.getChineseCalendarInfo(state.selectedDate);
     yearLegend.hidden = viewType !== "multiMonthYear";
     yearLegendLeft.textContent = `一 ${lunar.cyclicalYear}${lunar.zodiac}年`;
     yearLegendRight.textContent = "一 农历初一";
   }
 
   function updateLunarSummary() {
-    const lunar = getChineseCalendarInfo(state.selectedDate);
+    const lunar = dateUtils.getChineseCalendarInfo(state.selectedDate);
     const remoteMeta = state.dayMetaByDate[state.selectedDate] || {};
     const suffix = remoteMeta.solar_term ? ` ${remoteMeta.solar_term}` : "";
     lunarSummary.textContent = `${lunar.monthLabel}${lunar.dayLabel} ${lunar.cyclicalYear}年 [${lunar.zodiac}]${suffix}`;
   }
 
   function decorateDayCell(info) {
-    decorateDayCellElement(info.el, info.view.type, info.isOther, formatDateKey(info.date));
+    decorateDayCellElement(info.el, info.view.type, info.isOther, dateUtils.formatDateKey(info.date));
   }
 
   function decorateYearView() {
@@ -363,7 +260,7 @@
   }
 
   function dateKeyFromViewDate(date) {
-    return formatDateKey(date);
+    return dateUtils.formatDateKey(date);
   }
 
   function isDateWithinRange(dateKey, start, end) {
@@ -455,8 +352,7 @@
   }
 
   async function loadEventsForRange(start, end) {
-    const response = await fetch(`/api/events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
-    const data = await response.json();
+    const data = await api.listEvents(start, end);
     state.events = data.items || [];
     refreshCalendarEvents();
     decorateVisibleDayCells();
@@ -465,10 +361,7 @@
   }
 
   async function loadCalendarMetaForRange(start, end) {
-    const response = await fetch(
-      `/api/calendar/meta?start=${encodeURIComponent(start.slice(0, 10))}&end=${encodeURIComponent(end.slice(0, 10))}`,
-    );
-    const data = await response.json();
+    const data = await api.listCalendarMeta(start, end);
     state.dayMetaByDate = Object.fromEntries((data.items || []).map((item) => [item.date, item]));
     decorateVisibleDayCells();
     updateLunarSummary();
@@ -538,33 +431,21 @@
 
   async function loadHotTopics(force) {
     if (force) {
-      await fetch("/api/news/hot-topics/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: state.selectedDate, timezone: state.timezone }),
-      });
+      await api.refreshHotTopics(state.selectedDate, state.timezone);
     }
-    const response = await fetch(
-      `/api/calendar/hot-topics?date=${state.selectedDate}&timezone=${encodeURIComponent(state.timezone)}&limit=5`,
-    );
-    const data = await response.json();
+    const data = await api.getHotTopicPanel(state.selectedDate, state.timezone, 5);
     renderHotTopics(data.items || []);
   }
 
   async function sendCommand(text) {
     if (!text.trim()) return;
     assistantReply.textContent = "处理中...";
-    const response = await fetch("/api/text/commands", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        timezone: state.timezone,
-        session_id: state.sessionId,
-        now: new Date().toISOString(),
-      }),
+    const data = await api.handleTextCommand({
+      text,
+      timezone: state.timezone,
+      session_id: state.sessionId,
+      now: new Date().toISOString(),
     });
-    const data = await response.json();
     if (data.session_id) state.sessionId = data.session_id;
     assistantReply.textContent = data.reply_text || "已处理。";
     commandInput.value = "";
@@ -619,9 +500,7 @@
 
   async function loadVoiceCapabilities() {
     try {
-      const response = await fetch("/api/voice/capabilities");
-      if (!response.ok) throw new Error("capabilities");
-      const data = await response.json();
+      const data = await api.getVoiceCapabilities();
       state.voiceCapabilities = data;
       return data;
     } catch (_) {
@@ -733,13 +612,7 @@
     assistantReply.textContent = "正在转写语音...";
 
     try {
-      const response = await fetch("/api/voice/commands", {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail || "语音处理失败。");
+      const data = await api.handleVoiceCommand(formData, controller.signal);
       if (data.session_id) state.sessionId = data.session_id;
       state.voiceCapabilities = {
         ...(state.voiceCapabilities || {}),
@@ -924,13 +797,7 @@
   }
 
   function toApiDateTime(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hour = String(date.getHours()).padStart(2, "0");
-    const minute = String(date.getMinutes()).padStart(2, "0");
-    const second = String(date.getSeconds()).padStart(2, "0");
-    return `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+    return date.toISOString();
   }
 
   function escapeHtml(value) {
@@ -990,7 +857,7 @@
   agendaList.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-event-id]");
     if (!button) return;
-    await fetch(`/api/events/${button.dataset.eventId}`, { method: "DELETE" });
+    await api.deleteEvent(button.dataset.eventId);
     assistantReply.textContent = "已删除日程。";
     await loadCurrentEvents();
   });
