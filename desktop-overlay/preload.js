@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld("overlayAPI", {
   getConfig: () => ipcRenderer.invoke("overlay:config"),
   openCalendar: () => ipcRenderer.invoke("overlay:open-calendar"),
   callMcpTool: (toolName, argumentsPayload) => ipcRenderer.invoke("overlay:call-mcp-tool", toolName, argumentsPayload),
+  setMode: (mode) => ipcRenderer.invoke("overlay:set-mode", mode),
   audioToBase64: (blob) => blobToBase64(blob),
 });

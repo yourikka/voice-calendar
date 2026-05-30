@@ -1,29 +1,34 @@
-const commandInput = document.querySelector("#command-input");
-const sendButton = document.querySelector("#send-command");
-const recordButton = document.querySelector("#record-audio");
+const bubbleToggle = document.querySelector("#bubble-toggle");
+const assistantPanel = document.querySelector("#assistant-panel");
+const closePanelButton = document.querySelector("#close-panel");
 const openCalendarButton = document.querySelector("#open-calendar");
-const statusText = document.querySelector("#status-text");
-const backendText = document.querySelector("#backend-text");
-const transcriptText = document.querySelector("#transcript-text");
-const resultText = document.querySelector("#result-text");
-const intentText = document.querySelector("#intent-text");
-const voiceProvider = document.querySelector("#voice-provider");
-const replyText = document.querySelector("#reply-text");
-const stateText = document.querySelector("#state-text");
-const chatLog = document.querySelector("#chat-log");
-const candidatePanel = document.querySelector("#candidate-panel");
-const candidateCount = document.querySelector("#candidate-count");
-const candidateList = document.querySelector("#candidate-list");
-const confirmationPanel = document.querySelector("#confirmation-panel");
+const recordButton = document.querySelector("#record-audio");
+const sendButton = document.querySelector("#send-command");
+const undoButton = document.querySelector("#undo-button");
 const confirmButton = document.querySelector("#confirm-button");
 const cancelButton = document.querySelector("#cancel-button");
-const undoButton = document.querySelector("#undo-button");
+const candidateList = document.querySelector("#candidate-list");
+const candidatePanel = document.querySelector("#candidate-panel");
+const confirmationPanel = document.querySelector("#confirmation-panel");
+const candidateCount = document.querySelector("#candidate-count");
+const statusText = document.querySelector("#status-text");
+const backendText = document.querySelector("#backend-text");
+const stateText = document.querySelector("#state-text");
+const replyText = document.querySelector("#reply-text");
+const voiceProvider = document.querySelector("#voice-provider");
+const toolNameInput = document.querySelector("#tool-name");
+const commandInput = document.querySelector("#command-input");
+const transcriptText = document.querySelector("#transcript-text");
+const intentText = document.querySelector("#intent-text");
+const resultText = document.querySelector("#result-text");
+const voiceOrbLabel = document.querySelector("#voice-orb-label");
 
+let isExpanded = false;
 let mediaRecorder = null;
 let mediaStream = null;
 let audioChunks = [];
-let sessionId = null;
 let recording = false;
+let sessionId = null;
 let pendingOperationId = null;
 let pendingCandidates = [];
 let pendingIntent = null;
@@ -32,7 +37,14 @@ let pendingSlots = {};
 async function bootstrap() {
   const config = await window.overlayAPI.getConfig();
   backendText.textContent = config.backendBaseUrl;
-  undoButton.disabled = true;
+  await setMode("compact");
+}
+
+async function setMode(mode) {
+  isExpanded = mode === "expanded";
+  assistantPanel.hidden = !isExpanded;
+  bubbleToggle.hidden = isExpanded;
+  await window.overlayAPI.setMode(mode);
 }
 
 function setBusy(label) {
@@ -41,20 +53,6 @@ function setBusy(label) {
 
 function setIdle() {
   statusText.textContent = "待命";
-}
-
-function appendChatMessage(role, text) {
-  if (!text) return;
-  if (chatLog.children.length === 1 && chatLog.textContent.trim() === "等待命令") {
-    chatLog.innerHTML = "";
-  }
-  const item = document.createElement("article");
-  item.className = `chat-message ${role}`;
-  const paragraph = document.createElement("p");
-  paragraph.textContent = text;
-  item.appendChild(paragraph);
-  chatLog.appendChild(item);
-  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 function formatCandidateTime(value) {
@@ -84,11 +82,12 @@ function applyAgentResult(result) {
   pendingOperationId = result.operation_id || null;
   pendingIntent = result.intent || null;
   pendingSlots = result.slots || {};
-  intentText.textContent = result.intent || "unknown";
+
   stateText.textContent = result.state || "unknown";
   replyText.textContent = result.reply_text || "已处理。";
+  transcriptText.textContent = result.transcript || "等待语音输入";
+  intentText.textContent = result.intent || "unknown";
   resultText.textContent = JSON.stringify(result, null, 2);
-  appendChatMessage("assistant", result.reply_text || "已处理。");
 
   candidatePanel.hidden = true;
   confirmationPanel.hidden = true;
@@ -110,35 +109,24 @@ function applyAgentResult(result) {
   }
 
   undoButton.disabled = result.state !== "completed";
-
-  if (result.state === "collecting_slots" && result.missing_fields?.length) {
-    commandInput.placeholder = `${result.reply_text} 例如：明天晚上八点`;
-  } else {
-    commandInput.placeholder = "例如：明晚八点提醒我开周会";
-  }
+  commandInput.placeholder = result.state === "collecting_slots"
+    ? `${result.reply_text} 例如：明天晚上八点`
+    : "例如：明晚八点提醒我开周会";
 }
 
-async function sendCommand(text) {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-
+async function sendTextCommand() {
+  const text = commandInput.value.trim();
+  if (!text) return;
   setBusy("执行中");
-  appendChatMessage("user", trimmed);
   try {
-    const result = await window.overlayAPI.callMcpTool("calendar.handle_command", {
-      text: trimmed,
-      timezone: "Asia/Shanghai",
-      locale: "zh-CN",
-      session_id: sessionId,
-      now: new Date().toISOString(),
-    });
+    const toolName = normalizeToolName(toolNameInput.value);
+    const toolCall = resolveTextToolCall(toolName, text);
+    const result = await window.overlayAPI.callMcpTool(toolCall.toolName, toolCall.argumentsPayload);
     applyAgentResult(result);
     commandInput.value = "";
   } catch (error) {
-    replyText.textContent = String(error.message || error);
-    resultText.textContent = String(error.message || error);
-    intentText.textContent = "error";
     stateText.textContent = "error";
+    replyText.textContent = String(error.message || error);
   } finally {
     setIdle();
   }
@@ -158,49 +146,118 @@ async function startRecording() {
     audioChunks = [];
     mediaStream?.getTracks().forEach((track) => track.stop());
     mediaStream = null;
-    await transcribeAndSend(blob);
+    await handleVoiceBlob(blob);
   });
   mediaRecorder.start();
   recording = true;
-  recordButton.textContent = "停止录音";
   setBusy("录音中");
+  voiceOrbLabel.textContent = "停止";
+  stateText.textContent = "录音中";
 }
 
 async function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state === "inactive") return;
   mediaRecorder.stop();
   recording = false;
-  recordButton.textContent = "语音输入";
-  setBusy("转写中");
+  setBusy("识别中");
+  voiceOrbLabel.textContent = "处理中";
 }
 
-async function transcribeAndSend(blob) {
+async function handleVoiceBlob(blob) {
   try {
     const audioBase64 = await window.overlayAPI.audioToBase64(blob);
-    const result = await window.overlayAPI.callMcpTool("voice.handle_command", {
-      audio_base64: audioBase64,
-      filename: "voice-input.webm",
-      content_type: blob.type || "audio/webm",
-      timezone: "Asia/Shanghai",
-      locale: "zh-CN",
-      session_id: sessionId,
-      now: new Date().toISOString(),
-    });
-    transcriptText.textContent = result.transcript || "";
-    voiceProvider.textContent = result.asr_provider || "unknown";
-    commandInput.value = result.transcript || "";
-    appendChatMessage("user", result.transcript || "语音输入");
+    const toolName = normalizeToolName(toolNameInput.value);
+    const result = await executeVoiceTool(toolName, audioBase64, blob.type || "audio/webm");
+    voiceProvider.textContent = result.asr_provider || toolName;
+    voiceOrbLabel.textContent = "按住说";
     applyAgentResult(result);
-    setIdle();
   } catch (error) {
-    transcriptText.textContent = String(error.message || error);
-    voiceProvider.textContent = "error";
-    intentText.textContent = "error";
+    voiceOrbLabel.textContent = "重试";
     stateText.textContent = "error";
-    replyText.textContent = "语音转写失败";
-    resultText.textContent = "语音转写失败";
+    replyText.textContent = String(error.message || error);
+  } finally {
     setIdle();
   }
+}
+
+function normalizeToolName(value) {
+  return value.trim() || "voice.handle_command";
+}
+
+function buildTextPayload(toolName, text) {
+  const basePayload = {
+    text,
+    locale: "zh-CN",
+    timezone: "Asia/Shanghai",
+    now: new Date().toISOString(),
+  };
+  if (toolName === "calendar.handle_command") {
+    return {
+      ...basePayload,
+      session_id: sessionId,
+    };
+  }
+  return basePayload;
+}
+
+function buildVoicePayload(toolName, audioBase64, contentType) {
+  const basePayload = {
+    audio_base64: audioBase64,
+    filename: "voice-input.webm",
+    content_type: contentType,
+    locale: "zh-CN",
+    timezone: "Asia/Shanghai",
+    now: new Date().toISOString(),
+  };
+  if (toolName === "voice.handle_command" || toolName === "calendar.handle_command") {
+    return {
+      ...basePayload,
+      session_id: sessionId,
+    };
+  }
+  return basePayload;
+}
+
+function resolveTextToolCall(toolName, text) {
+  if (toolName === "voice.handle_command") {
+    return {
+      toolName: "calendar.handle_command",
+      argumentsPayload: buildTextPayload("calendar.handle_command", text),
+    };
+  }
+  return {
+    toolName,
+    argumentsPayload: buildTextPayload(toolName, text),
+  };
+}
+
+async function executeVoiceTool(toolName, audioBase64, contentType) {
+  if (toolName === "voice.handle_command") {
+    return window.overlayAPI.callMcpTool(
+      "voice.handle_command",
+      buildVoicePayload("voice.handle_command", audioBase64, contentType),
+    );
+  }
+
+  const transcriptResult = await window.overlayAPI.callMcpTool(
+    "voice.transcribe_audio",
+    buildVoicePayload("voice.transcribe_audio", audioBase64, contentType),
+  );
+  const transcript = transcriptResult.transcript?.trim();
+  if (!transcript) {
+    throw new Error("未识别到有效语音内容。");
+  }
+
+  const targetTool = toolName === "voice.transcribe_audio" ? "calendar.handle_command" : toolName;
+  const targetResult = await window.overlayAPI.callMcpTool(
+    targetTool,
+    buildTextPayload(targetTool, transcript),
+  );
+  return {
+    ...targetResult,
+    transcript,
+    asr_provider: transcriptResult.asr_provider || targetResult.asr_provider,
+  };
 }
 
 async function undoLastOperation() {
@@ -216,8 +273,8 @@ async function undoLastOperation() {
       requires_user_input: false,
     });
   } catch (error) {
-    replyText.textContent = String(error.message || error);
     stateText.textContent = "error";
+    replyText.textContent = String(error.message || error);
   } finally {
     setIdle();
   }
@@ -239,12 +296,9 @@ async function confirmPendingOperation(confirmed) {
       candidates: [],
       requires_user_input: false,
     });
-    if (!confirmed) {
-      replyText.textContent = result.reply_text || "已取消操作。";
-    }
   } catch (error) {
-    replyText.textContent = String(error.message || error);
     stateText.textContent = "error";
+    replyText.textContent = String(error.message || error);
   } finally {
     setIdle();
   }
@@ -264,15 +318,23 @@ async function resolveCandidateSelection(index) {
     });
     applyAgentResult(result);
   } catch (error) {
-    replyText.textContent = String(error.message || error);
     stateText.textContent = "error";
+    replyText.textContent = String(error.message || error);
   } finally {
     setIdle();
   }
 }
 
-sendButton.addEventListener("click", async () => {
-  await sendCommand(commandInput.value);
+bubbleToggle.addEventListener("click", async () => {
+  await setMode("expanded");
+});
+
+closePanelButton.addEventListener("click", async () => {
+  await setMode("compact");
+});
+
+openCalendarButton.addEventListener("click", async () => {
+  await window.overlayAPI.openCalendar();
 });
 
 recordButton.addEventListener("click", async () => {
@@ -283,8 +345,12 @@ recordButton.addEventListener("click", async () => {
   await stopRecording();
 });
 
-openCalendarButton.addEventListener("click", async () => {
-  await window.overlayAPI.openCalendar();
+sendButton.addEventListener("click", async () => {
+  await sendTextCommand();
+});
+
+undoButton.addEventListener("click", async () => {
+  await undoLastOperation();
 });
 
 confirmButton.addEventListener("click", async () => {
@@ -301,12 +367,8 @@ candidateList.addEventListener("click", async (event) => {
   await resolveCandidateSelection(Number(button.dataset.candidateIndex));
 });
 
-undoButton.addEventListener("click", async () => {
-  await undoLastOperation();
-});
-
 bootstrap().catch((error) => {
   backendText.textContent = "连接失败";
+  stateText.textContent = "error";
   replyText.textContent = String(error.message || error);
-  resultText.textContent = String(error.message || error);
 });

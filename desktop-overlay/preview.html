@@ -32,16 +32,30 @@
           const fake = {
             getConfig: async () => ({ backendBaseUrl: "http://127.0.0.1:8000" }),
             openCalendar: async () => ({ ok: true }),
+            setMode: async () => ({ ok: true }),
             audioToBase64: async () => "",
-            callMcpTool: async (toolName) => {
+            callMcpTool: async (toolName, payload) => {
               if (toolName === "calendar.undo_last_operation") {
                 return { state: "undone", reply_text: "已撤销刚才的操作。" };
+              }
+              if (toolName === "news.get_today_hot_topics") {
+                return {
+                  state: "completed",
+                  reply_text: "已获取今日热点。",
+                  transcript: payload?.text || "热点查询",
+                  intent: "get_today_hot_topics",
+                  topics: [
+                    { title: "AI 办公工具热度上升", summary: "多模态与桌面代理成为近期焦点。" },
+                    { title: "端侧语音助手体验再被关注", summary: "低延迟与可控工具调用成为产品重点。" },
+                  ],
+                };
               }
               return {
                 session_id: "preview-session",
                 state: "collecting_slots",
                 intent: "create_event",
                 reply_text: "这个事件几点开始？",
+                transcript: payload?.text || "有个会议",
                 requires_user_input: true,
                 slots: { title: "会议" },
                 missing_fields: ["start_time"],

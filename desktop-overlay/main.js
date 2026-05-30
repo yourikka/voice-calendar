@@ -3,6 +3,8 @@ const path = require("node:path");
 
 const BACKEND_BASE_URL = process.env.VOICE_CALENDAR_API_BASE || "http://127.0.0.1:8000";
 const MCP_BASE_URL = process.env.VOICE_CALENDAR_MCP_BASE || "http://127.0.0.1:8001";
+const COMPACT_SIZE = { width: 92, height: 92 };
+const EXPANDED_SIZE = { width: 380, height: 620 };
 
 let overlayWindow = null;
 let overlayMcpClient = null;
@@ -17,8 +19,8 @@ async function getMcpClient() {
 
 function createOverlayWindow() {
   overlayWindow = new BrowserWindow({
-    width: 360,
-    height: 520,
+    width: COMPACT_SIZE.width,
+    height: COMPACT_SIZE.height,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -37,9 +39,16 @@ function createOverlayWindow() {
 
   overlayWindow.loadFile(path.join(__dirname, "src/index.html"));
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.on("closed", () => {
     overlayWindow = null;
   });
+}
+
+function resizeOverlayWindow(mode) {
+  if (!overlayWindow) return;
+  const target = mode === "expanded" ? EXPANDED_SIZE : COMPACT_SIZE;
+  overlayWindow.setContentSize(target.width, target.height, true);
 }
 
 app.whenReady().then(() => {
@@ -80,4 +89,9 @@ ipcMain.handle("overlay:open-calendar", async () => {
 ipcMain.handle("overlay:call-mcp-tool", async (_event, toolName, argumentsPayload) => {
   const client = await getMcpClient();
   return client.callTool(toolName, argumentsPayload);
+});
+
+ipcMain.handle("overlay:set-mode", async (_event, mode) => {
+  resizeOverlayWindow(mode);
+  return { ok: true };
 });

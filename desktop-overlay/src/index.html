@@ -3,18 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Voice Calendar Overlay</title>
+    <title>Voice Calendar Bubble</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="overlay-shell">
-      <section class="overlay-card">
-        <header class="overlay-header">
+      <button id="bubble-toggle" class="bubble-toggle" type="button" aria-label="打开语音助手">
+        <span class="bubble-ring"></span>
+        <span class="bubble-core">语音</span>
+      </button>
+
+      <section id="assistant-panel" class="assistant-panel" hidden>
+        <header class="panel-header">
           <div>
             <p class="eyebrow">Desktop Agent</p>
             <h1>Voice Calendar</h1>
           </div>
-          <button id="open-calendar" class="ghost-button" type="button">打开日历</button>
+          <div class="header-actions">
+            <button id="open-calendar" class="ghost-button compact-button" type="button">日历</button>
+            <button id="close-panel" class="ghost-button compact-button" type="button">收起</button>
+          </div>
         </header>
 
         <div class="status-strip">
@@ -22,62 +30,54 @@
           <span id="backend-text">连接中</span>
         </div>
 
-        <section class="transcript-panel">
-          <label class="panel-label" for="command-input">输入指令</label>
-          <textarea
-            id="command-input"
-            rows="4"
-            placeholder="例如：明晚八点提醒我开周会"
-          ></textarea>
-          <div class="action-row">
-            <button id="send-command" class="primary-button" type="button">发送到 MCP</button>
-            <button id="record-audio" class="accent-button" type="button">语音输入</button>
-          </div>
-        </section>
-
-        <section class="result-panel">
-          <div class="panel-meta">
-            <span class="panel-label">对话</span>
-            <div class="result-actions">
-              <span id="state-text">待命</span>
-              <button id="undo-button" class="ghost-button compact-button" type="button">撤销</button>
-            </div>
-          </div>
-          <div id="chat-log" class="chat-log" aria-live="polite">
-            <article class="chat-message assistant">
-              <p>等待命令</p>
-            </article>
-          </div>
-          <p id="reply-text" class="result-block">等待命令</p>
-
-          <div id="candidate-panel" class="candidate-panel" hidden>
-            <div class="panel-meta">
-              <span class="panel-label">候选日程</span>
-              <span id="candidate-count">0</span>
-            </div>
-            <div id="candidate-list" class="candidate-list"></div>
-          </div>
-
-          <div id="confirmation-panel" class="confirmation-panel" hidden>
-            <button id="confirm-button" class="primary-button" type="button">确认</button>
-            <button id="cancel-button" class="ghost-button" type="button">取消</button>
-          </div>
-
-          <div class="panel-meta">
-            <span class="panel-label">语音输入</span>
+        <section class="voice-panel">
+          <button id="record-audio" class="voice-orb" type="button" aria-label="开始语音输入">
+            <span id="voice-orb-label">按住说</span>
+          </button>
+          <div class="voice-meta">
+            <strong id="state-text">待命</strong>
+            <p id="reply-text">点击语音球开始输入，默认调用日历 MCP。</p>
             <span id="voice-provider">未录音</span>
           </div>
-          <p id="transcript-text" class="result-block">等待语音输入</p>
-
-          <details class="debug-panel">
-            <summary>调试详情</summary>
-            <div class="panel-meta">
-              <span class="panel-label">执行结果</span>
-              <span id="intent-text">未执行</span>
-            </div>
-            <pre id="result-text" class="result-block">等待命令</pre>
-          </details>
         </section>
+
+        <section class="tool-panel">
+          <label class="panel-label" for="tool-name">工具</label>
+          <input id="tool-name" type="text" value="voice.handle_command" />
+          <p class="tool-hint">后续可改成其他 MCP tool，例如 `calendar.handle_command`、`news.get_today_hot_topics`。</p>
+        </section>
+
+        <section class="input-panel">
+          <label class="panel-label" for="command-input">文本补充</label>
+          <textarea id="command-input" rows="3" placeholder="例如：明晚八点提醒我开周会"></textarea>
+          <div class="action-row">
+            <button id="send-command" class="primary-button" type="button">发送</button>
+            <button id="undo-button" class="ghost-button" type="button">撤销</button>
+          </div>
+        </section>
+
+        <div id="candidate-panel" class="candidate-panel" hidden>
+          <div class="panel-meta">
+            <span class="panel-label">候选</span>
+            <span id="candidate-count">0</span>
+          </div>
+          <div id="candidate-list" class="candidate-list"></div>
+        </div>
+
+        <div id="confirmation-panel" class="confirmation-panel" hidden>
+          <button id="confirm-button" class="primary-button" type="button">确认</button>
+          <button id="cancel-button" class="ghost-button" type="button">取消</button>
+        </div>
+
+        <details class="debug-panel">
+          <summary>调试详情</summary>
+          <div class="panel-meta">
+            <span class="panel-label">Intent</span>
+            <span id="intent-text">未执行</span>
+          </div>
+          <p id="transcript-text" class="result-block">等待语音输入</p>
+          <pre id="result-text" class="result-block">等待命令</pre>
+        </details>
       </section>
     </main>
 
