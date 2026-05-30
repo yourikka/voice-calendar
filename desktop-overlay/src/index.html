@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Calendar Overlay</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="overlay-shell">
+      <section class="overlay-card">
+        <header class="overlay-header">
+          <div>
+            <p class="eyebrow">Desktop Agent</p>
+            <h1>Voice Calendar</h1>
+          </div>
+          <button id="open-calendar" class="ghost-button" type="button">打开日历</button>
+        </header>
+
+        <div class="status-strip">
+          <span id="status-text">待命</span>
+          <span id="backend-text">连接中</span>
+        </div>
+
+        <section class="transcript-panel">
+          <label class="panel-label" for="command-input">输入指令</label>
+          <textarea
+            id="command-input"
+            rows="4"
+            placeholder="例如：明晚八点提醒我开周会"
+          ></textarea>
+          <div class="action-row">
+            <button id="send-command" class="primary-button" type="button">发送到 MCP</button>
+            <button id="record-audio" class="accent-button" type="button">语音输入</button>
+          </div>
+        </section>
+
+        <section class="result-panel">
+          <div class="panel-meta">
+            <span class="panel-label">识别文本</span>
+            <span id="voice-provider">未录音</span>
+          </div>
+          <p id="transcript-text" class="result-block">等待语音输入</p>
+
+          <div class="panel-meta">
+            <span class="panel-label">执行结果</span>
+            <span id="intent-text">未执行</span>
+          </div>
+          <pre id="result-text" class="result-block">等待命令</pre>
+        </section>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

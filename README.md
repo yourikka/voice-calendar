@@ -40,6 +40,18 @@ Open the Web workspace:
 http://127.0.0.1:8000/
 ```
 
+Run the standalone MCP server over stdio:
+
+```bash
+.venv/bin/python -m app.mcp_entry
+```
+
+The FastAPI app also mounts the streamable HTTP MCP endpoint at:
+
+```text
+http://127.0.0.1:8000/mcp
+```
+
 Optional ASR configuration:
 
 Local `faster-whisper` is now the default ASR provider. The default model set is:
@@ -82,7 +94,34 @@ export VOICE_AGENT_MODEL="your-agent-model"
 - Voice capability probe: `GET /api/voice/capabilities`
 - Hot topics and daily briefing: `GET /api/news/today`, `GET /api/calendar/hot-topics`, `GET /api/briefings/daily`
 - MCP-style tool adapter: `POST /api/mcp/tools/{tool_name}`
+- Standard MCP server: stdio via `python -m app.mcp_entry`, streamable HTTP via `GET/POST /mcp`
 - Desktop Web workspace: `GET /`
+
+## Desktop Overlay
+
+A desktop floating overlay now lives in `desktop-overlay/`.
+
+Install and run:
+
+```bash
+cd desktop-overlay
+npm install
+npm start
+```
+
+Default behavior:
+
+- Always-on-top frameless desktop window
+- Text command entry that calls `calendar.handle_command`
+- Voice recording that uploads audio to `/api/voice/transcriptions`
+- Transcribed text is then executed through the same MCP command tool
+- "打开日历" opens the full Web workspace in the browser
+
+Optional backend override:
+
+```bash
+export VOICE_CALENDAR_API_BASE="http://127.0.0.1:8000"
+```
 
 ## Web Workspace
 

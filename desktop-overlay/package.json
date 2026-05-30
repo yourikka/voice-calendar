@@ -1,0 +1,21 @@
+{
+  "name": "desktop-overlay",
+  "version": "0.1.0",
+  "description": "Desktop floating overlay for Voice Calendar",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [
+    "voice-calendar",
+    "electron",
+    "mcp"
+  ],
+  "author": "yourikka",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "electron": "^42.3.0"
+  }
+}
