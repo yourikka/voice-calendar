@@ -1,3 +1,7 @@
+@import url("https://cdn.jsdelivr.net/npm/fontsource-noto-sans-sc@4.0.0/chinese-simplified-400.css");
+@import url("https://cdn.jsdelivr.net/npm/fontsource-noto-sans-sc@4.0.0/chinese-simplified-500.css");
+@import url("https://cdn.jsdelivr.net/npm/fontsource-noto-sans-sc@4.0.0/chinese-simplified-700.css");
+
 :root {
   --bg: #f5f5f3;
   --surface: #fbfbfa;
@@ -24,7 +28,7 @@ body {
   background:
     linear-gradient(180deg, #fafafa 0, var(--bg) 35%),
     var(--bg);
-  font-family: "Avenir Next", "DIN Alternate", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Noto Sans SC", "Avenir Next", "DIN Alternate", "PingFang SC", "Microsoft YaHei", sans-serif;
   letter-spacing: 0;
 }
 

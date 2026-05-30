@@ -30,11 +30,53 @@
           document.head.appendChild(stylesheet);
 
           const fake = {
-            getConfig: async () => ({ backendBaseUrl: "http://127.0.0.1:8000" }),
-            openCalendar: async () => ({ ok: true }),
+            getConfig: async () => ({
+              backendBaseUrl: "http://127.0.0.1:8000",
+              toolOptions: [
+                {
+                  value: "voice.handle_command",
+                  label: "语音日历",
+                  description: "录音后直接识别并执行日历命令，适合多轮语音补全。",
+                },
+                {
+                  value: "calendar.handle_command",
+                  label: "文本日历命令",
+                  description: "文本和转写结果都直接进入日历命令解析。",
+                },
+                {
+                  value: "news.get_today_hot_topics",
+                  label: "今日热点",
+                  description: "获取当天热点资讯，语音输入会先转写再触发热点工具。",
+                },
+              ],
+            }),
+            openCalendar: async () => {
+              document.title = "Voice Calendar Overlay Preview - calendar opened";
+              return { ok: true, target: "preview-window" };
+            },
             setMode: async () => ({ ok: true }),
+            startDrag: async () => ({ ok: true }),
+            moveDrag: async () => ({ ok: true }),
+            endDrag: async () => ({ ok: true }),
             audioToBase64: async () => "",
             callMcpTool: async (toolName, payload) => {
+              if (toolName === "voice.transcribe_audio") {
+                return {
+                  transcript: "今天有什么热点",
+                  asr_provider: "preview-asr",
+                };
+              }
+              if (toolName === "voice.handle_command") {
+                return {
+                  session_id: "preview-session",
+                  state: "completed",
+                  intent: "get_today_news",
+                  reply_text: "已根据语音获取今日热点。",
+                  transcript: "今天有什么热点",
+                  asr_provider: "preview-asr",
+                  requires_user_input: false,
+                };
+              }
               if (toolName === "calendar.undo_last_operation") {
                 return { state: "undone", reply_text: "已撤销刚才的操作。" };
               }

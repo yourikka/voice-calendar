@@ -8,57 +8,55 @@
   </head>
   <body>
     <main class="overlay-shell">
-      <button id="bubble-toggle" class="bubble-toggle" type="button" aria-label="打开语音助手">
-        <span class="bubble-ring"></span>
-        <span class="bubble-core">语音</span>
-      </button>
+      <section class="overlay-stack">
+        <section id="compact-bar" class="compact-dock" aria-label="语音智能体">
+        <span id="state-text" hidden>待命</span>
+        <span id="reply-text" hidden>等待语音输入</span>
+        <button id="record-audio" class="voice-key" type="button" aria-label="开始语音输入">
+          <span id="voice-orb-label">语音</span>
+        </button>
+        <span id="compact-drag-handle" class="compact-drag-handle pywebview-drag-region" aria-hidden="true"></span>
+        <button id="expand-panel" class="expand-key" type="button" aria-label="展开工具">
+          <span aria-hidden="true">⌄</span>
+        </button>
+        </section>
 
-      <section id="assistant-panel" class="assistant-panel" hidden>
-        <header class="panel-header">
-          <div>
-            <p class="eyebrow">Desktop Agent</p>
-            <h1>Voice Calendar</h1>
+        <section id="assistant-panel" class="assistant-panel" hidden>
+        <header class="panel-header pywebview-drag-region">
+          <div id="panel-drag-handle" class="panel-title drag-handle">
+            <strong>Voice Agent</strong>
+            <span id="status-text">待命</span>
           </div>
           <div class="header-actions">
-            <button id="open-calendar" class="ghost-button compact-button" type="button">日历</button>
-            <button id="close-panel" class="ghost-button compact-button" type="button">收起</button>
+            <button id="open-calendar" class="icon-button text-button" type="button">日历</button>
+            <button id="close-panel" class="icon-button" type="button" aria-label="收起">
+              <span aria-hidden="true">×</span>
+            </button>
           </div>
         </header>
 
-        <div class="status-strip">
-          <span id="status-text">待命</span>
-          <span id="backend-text">连接中</span>
-        </div>
-
-        <section class="voice-panel">
-          <button id="record-audio" class="voice-orb" type="button" aria-label="开始语音输入">
-            <span id="voice-orb-label">按住说</span>
+        <section class="tool-panel" aria-labelledby="tool-title">
+          <button id="tool-panel-toggle" class="section-toggle" type="button" aria-expanded="false" aria-controls="tool-panel-body">
+            <span class="section-heading">
+              <span id="tool-title">MCP 工具</span>
+              <span id="backend-text">连接中</span>
+            </span>
+            <span id="tool-panel-arrow" class="section-arrow" aria-hidden="true">⌄</span>
           </button>
-          <div class="voice-meta">
-            <strong id="state-text">待命</strong>
-            <p id="reply-text">点击语音球开始输入，默认调用日历 MCP。</p>
-            <span id="voice-provider">未录音</span>
+          <div id="tool-panel-body" class="tool-panel-body" hidden>
+            <div id="tool-checklist" class="tool-checklist"></div>
           </div>
         </section>
 
-        <section class="tool-panel">
-          <label class="panel-label" for="tool-name">工具</label>
-          <input id="tool-name" type="text" value="voice.handle_command" />
-          <p class="tool-hint">后续可改成其他 MCP tool，例如 `calendar.handle_command`、`news.get_today_hot_topics`。</p>
-        </section>
-
-        <section class="input-panel">
-          <label class="panel-label" for="command-input">文本补充</label>
-          <textarea id="command-input" rows="3" placeholder="例如：明晚八点提醒我开周会"></textarea>
-          <div class="action-row">
-            <button id="send-command" class="primary-button" type="button">发送</button>
-            <button id="undo-button" class="ghost-button" type="button">撤销</button>
-          </div>
+        <section class="result-panel" aria-label="执行结果">
+          <p id="reply-message" class="reply-message">等待语音输入</p>
+          <p id="transcript-text">等待语音输入</p>
+          <p id="voice-provider">Agent fallback 已启用</p>
         </section>
 
         <div id="candidate-panel" class="candidate-panel" hidden>
-          <div class="panel-meta">
-            <span class="panel-label">候选</span>
+          <div class="section-heading">
+            <span>候选</span>
             <span id="candidate-count">0</span>
           </div>
           <div id="candidate-list" class="candidate-list"></div>
@@ -68,16 +66,7 @@
           <button id="confirm-button" class="primary-button" type="button">确认</button>
           <button id="cancel-button" class="ghost-button" type="button">取消</button>
         </div>
-
-        <details class="debug-panel">
-          <summary>调试详情</summary>
-          <div class="panel-meta">
-            <span class="panel-label">Intent</span>
-            <span id="intent-text">未执行</span>
-          </div>
-          <p id="transcript-text" class="result-block">等待语音输入</p>
-          <pre id="result-text" class="result-block">等待命令</pre>
-        </details>
+        </section>
       </section>
     </main>
 

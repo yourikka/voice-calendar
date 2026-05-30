@@ -24,6 +24,9 @@ dev = [
 voice = [
   "faster-whisper>=1.1.1",
 ]
+desktop = [
+  "pywebview>=5.1",
+]
 
 [tool.setuptools]
 package-dir = {"" = "backend"}
