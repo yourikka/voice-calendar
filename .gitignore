@@ -3,7 +3,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.env
 backend/data/
 *.egg-info/
 .desktop-lite-state.json
+.desktop-lite-notify.log
 desktop-lite/__pycache__/

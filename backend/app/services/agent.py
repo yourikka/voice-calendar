@@ -6,7 +6,7 @@ import re
 import httpx
 
 from app.config import Settings
-from app.models import ParsedCommand, TextCommandRequest
+from app.models import AgentHealthResponse, ParsedCommand, TextCommandRequest
 from app.services.nlu import normalize_text, request_now
 
 
@@ -47,6 +47,51 @@ class ThirdPartyAgentParser:
     def is_configured(self) -> bool:
         return bool(self.settings.agent_api_url and self.settings.agent_model)
 
+    def health(self) -> AgentHealthResponse:
+        endpoint = self._completion_url() if self.settings.agent_api_url else None
+        if not self.is_configured():
+            return AgentHealthResponse(
+                configured=False,
+                provider=self.settings.agent_provider,
+                model=self.settings.agent_model,
+                endpoint=endpoint,
+                reachable=False,
+                detail="未配置 VOICE_AGENT_API_URL 或 VOICE_AGENT_MODEL。",
+            )
+
+        headers = {"Content-Type": "application/json"}
+        if self.settings.agent_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.agent_api_key}"
+
+        body = {
+            "model": self.settings.agent_model,
+            "temperature": 0,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}],
+        }
+        try:
+            with httpx.Client(timeout=min(self.settings.agent_timeout_seconds, 10.0)) as client:
+                response = client.post(self._completion_url(), headers=headers, json=body)
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            return AgentHealthResponse(
+                configured=True,
+                provider=self.settings.agent_provider,
+                model=self.settings.agent_model,
+                endpoint=self._completion_url(),
+                reachable=False,
+                detail=str(exc),
+            )
+
+        return AgentHealthResponse(
+            configured=True,
+            provider=self.settings.agent_provider,
+            model=self.settings.agent_model,
+            endpoint=self._completion_url(),
+            reachable=True,
+            detail="agent fallback 可用。",
+        )
+
     def parse(self, request: TextCommandRequest) -> ParsedCommand | None:
         if not self.is_configured():
             return None
@@ -61,7 +106,7 @@ class ThirdPartyAgentParser:
             transcript=request.text,
             normalized_text=normalize_text(request.text),
             intent=str(parsed.get("intent") or "unknown"),
-            slots=parsed.get("slots") or {},
+            slots=self._normalize_slots(str(parsed.get("intent") or "unknown"), parsed.get("slots") or {}),
             missing_fields=list(parsed.get("missing_fields") or []),
             parser=f"agent:{self.settings.agent_provider}",
             confidence=float(parsed.get("confidence") or 0.75),
@@ -92,10 +137,43 @@ class ThirdPartyAgentParser:
                 },
             ],
         }
+        url = self._completion_url()
         with httpx.Client(timeout=self.settings.agent_timeout_seconds) as client:
-            response = client.post(self.settings.agent_api_url, headers=headers, json=body)
+            response = client.post(url, headers=headers, json=body)
             response.raise_for_status()
         return response.json()
+
+    def _completion_url(self) -> str:
+        assert self.settings.agent_api_url is not None
+        base_url = self.settings.agent_api_url.rstrip("/")
+        if self.settings.agent_provider == "openai-compatible":
+            if base_url.endswith("/chat/completions"):
+                return base_url
+            if base_url.endswith("/v1"):
+                return f"{base_url}/chat/completions"
+        return base_url
+
+    @staticmethod
+    def _normalize_slots(intent: str, slots: dict) -> dict:
+        normalized = dict(slots)
+        if intent in {"create_event", "create_reminder", "update_event", "delete_event"}:
+            if "title" not in normalized:
+                for alias in ("content", "name", "subject", "event_name", "reminder_text"):
+                    value = normalized.get(alias)
+                    if value:
+                        normalized["title"] = value
+                        break
+        if intent == "create_event" and "start_time" not in normalized and normalized.get("time"):
+            normalized["start_time"] = normalized["time"]
+        if intent == "update_event":
+            if "new_start_time" not in normalized:
+                if normalized.get("time"):
+                    normalized["new_start_time"] = normalized["time"]
+                elif normalized.get("start_time"):
+                    normalized["new_start_time"] = normalized["start_time"]
+            if "target_date" not in normalized and normalized.get("date"):
+                normalized["target_date"] = normalized["date"]
+        return normalized
 
     @staticmethod
     def _parse_content(content: str) -> dict:

@@ -159,6 +159,15 @@ class VoiceCapabilitiesResponse(BaseModel):
     detail: str | None = None
 
 
+class AgentHealthResponse(BaseModel):
+    configured: bool
+    provider: str | None = None
+    model: str | None = None
+    endpoint: str | None = None
+    reachable: bool = False
+    detail: str | None = None
+
+
 class NewsItemRead(BaseModel):
     id: str
     title: str
@@ -237,3 +246,26 @@ class MCPToolRequest(BaseModel):
 class MCPToolResponse(BaseModel):
     tool: str
     result: dict
+
+
+class DueReminderRead(BaseModel):
+    delivery_id: str
+    event_id: str
+    title: str
+    description: str = ""
+    start_at: datetime
+    timezone: str
+    source: str
+
+
+class DueReminderListResponse(BaseModel):
+    items: list[DueReminderRead]
+
+
+class NotificationAcknowledgeRequest(BaseModel):
+    delivery_id: str
+    channel: str
+
+
+class NotificationAcknowledgeResponse(BaseModel):
+    status: str

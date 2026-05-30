@@ -61,6 +61,8 @@ button {
   gap: 10px;
   align-content: start;
   overflow: hidden;
+  position: relative;
+  padding-top: 0;
 }
 
 [hidden] {
@@ -343,6 +345,7 @@ button {
   line-height: 1.45;
 }
 
+#parser-source,
 #voice-provider {
   margin-top: 6px;
   color: var(--muted);

@@ -71,6 +71,9 @@ COLON_TIME_RE = re.compile(rf"({TIME_PREFIX_RE})(\d{{1,2}})[:：](\d{{1,2}})")
 CHINESE_TIME_RE = re.compile(
     rf"({TIME_PREFIX_RE})([零一二两三四五六七八九十\d]{{1,3}})点(半|[零一二三四五六七八九十\d]{{1,3}}分?)?"
 )
+RELATIVE_REMINDER_RE = re.compile(
+    r"([零一二两三四五六七八九十百\d]+)\s*(秒钟|秒|分钟|分|小时|个小时|钟头|个钟头)\s*(后|之后)"
+)
 EXPLICIT_DATE_RE = re.compile(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})[日号]?")
 CHINESE_EXPLICIT_DATE_RE = re.compile(
     r"(?:(\d{4})年)?([零一二两三四五六七八九十]{1,3})月([零一二两三四五六七八九十]{1,3})[日号]?"
@@ -180,6 +183,23 @@ def _parse_time_range(text: str) -> tuple[time | None, time | None]:
     return None, None
 
 
+def _resolve_relative_reminder_datetime(text: str, base: datetime) -> datetime | None:
+    match = RELATIVE_REMINDER_RE.search(text)
+    if not match:
+        return None
+    amount = _parse_chinese_number(match.group(1))
+    unit = match.group(2)
+    if amount <= 0:
+        return None
+    if unit in {"秒钟", "秒"}:
+        return base + timedelta(seconds=amount)
+    if unit in {"分钟", "分"}:
+        return base + timedelta(minutes=amount)
+    if unit in {"小时", "个小时", "钟头", "个钟头"}:
+        return base + timedelta(hours=amount)
+    return None
+
+
 def _resolve_date(text: str, base: datetime) -> date | None:
     explicit = EXPLICIT_DATE_RE.search(text)
     if explicit:
@@ -254,6 +274,8 @@ def _resolve_window(text: str, base: datetime) -> tuple[datetime, datetime]:
 def _format_time_value(value: time | None) -> str | None:
     if value is None:
         return None
+    if value.second:
+        return value.strftime("%H:%M:%S")
     return value.strftime("%H:%M")
 
 
@@ -274,6 +296,7 @@ def _remove_time_and_date_tokens(text: str) -> str:
     cleaned = SLASH_DATE_RE.sub("", cleaned)
     cleaned = WEEKDAY_RE.sub("", cleaned)
     cleaned = re.sub(r"(今天|今日|明天|明日|后天|大后天|今早|明早|明晚|今晚|上午|下午|晚上|中午)", "", cleaned)
+    cleaned = RELATIVE_REMINDER_RE.sub("", cleaned)
     cleaned = COLON_TIME_RE.sub("", cleaned)
     cleaned = CHINESE_TIME_RE.sub("", cleaned)
     cleaned = re.sub(r"提前[零一二两三四五六七八九十\d]+分钟提醒我", "", cleaned)
@@ -291,11 +314,20 @@ def _cleanup_title(value: str) -> str:
 
 
 def _extract_reminder_title(text: str) -> str:
-    marker = "提醒我" if "提醒我" in text else "提醒"
-    _, _, title = text.partition(marker)
+    marker = ""
+    for candidate in ("提醒我", "提醒", "记一下", "帮我记下", "帮我记", "记个", "记得"):
+        if candidate in text:
+            marker = candidate
+            break
+    if marker:
+        _, _, title = text.partition(marker)
+    else:
+        title = text
     title = _remove_time_and_date_tokens(title)
     title = re.sub(r"^(去|要去|需要去|记得去)", "", title)
     title = re.sub(r"^(一下|一下子)", "", title)
+    if re.match(r"^给我[\u4e00-\u9fff]{1,6}", title):
+        return title.strip("的了吧呀呢，。,. ")
     title = _cleanup_title(title)
     return title or "未命名提醒"
 
@@ -361,6 +393,10 @@ def _looks_like_list_query(text: str) -> bool:
     return bool(re.search(r"(今天|明天|后天|明晚|今晚|本周|这周|下周).*(忙不忙|空不空)", text))
 
 
+def _looks_like_reminder(text: str) -> bool:
+    return any(token in text for token in ("提醒我", "提醒", "记一下", "记得", "帮我记", "帮我记下", "记个"))
+
+
 class RuleBasedCommandParser:
     def parse(self, request: TextCommandRequest) -> ParsedCommand:
         text = normalize_text(request.text)
@@ -408,11 +444,11 @@ class RuleBasedCommandParser:
         if _looks_like_list_query(text) or "日程" in text:
             return self._parse_list(request, text, base)
 
+        if _looks_like_reminder(text):
+            return self._parse_reminder(request, text, base)
+
         if self._looks_like_event(text):
             return self._parse_event(request, text, base)
-
-        if "提醒我" in text or text.startswith("提醒"):
-            return self._parse_reminder(request, text, base)
 
         return ParsedCommand(
             transcript=request.text,
@@ -429,6 +465,19 @@ class RuleBasedCommandParser:
         return start_time is not None and end_time is not None
 
     def _parse_reminder(self, request: TextCommandRequest, text: str, base: datetime) -> ParsedCommand:
+        relative_at = _resolve_relative_reminder_datetime(text, base)
+        if relative_at is not None:
+            return ParsedCommand(
+                transcript=request.text,
+                normalized_text=text,
+                intent="create_reminder",
+                slots={
+                    "title": _extract_reminder_title(text),
+                    "date": relative_at.date().isoformat(),
+                    "time": _format_time_value(relative_at.timetz().replace(tzinfo=None)),
+                },
+                confidence=0.95,
+            )
         day = _resolve_date(text, base) or base.date()
         start_time, _ = _parse_time_range(text)
         missing_fields: list[str] = []
@@ -529,14 +578,16 @@ class HybridCommandParser:
         self.rule_parser = RuleBasedCommandParser()
         self.fallback_parser = fallback_parser
 
+    def parse_rule_only(self, request: TextCommandRequest) -> ParsedCommand:
+        return self.rule_parser.parse(request)
+
     def parse(self, request: TextCommandRequest) -> ParsedCommand:
         parsed = self.rule_parser.parse(request)
         should_fallback = (
             self.fallback_parser is not None
             and (
                 parsed.intent == "unknown"
-                or parsed.confidence < 0.7
-                or (parsed.missing_fields and parsed.intent in {"create_event", "create_reminder", "update_event"})
+                or (parsed.intent == "unknown" and parsed.confidence < 0.7)
             )
         )
         if not should_fallback:

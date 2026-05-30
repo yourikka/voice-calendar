@@ -907,9 +907,11 @@
   }
 
   function formatTime(value) {
-    return new Date(value).toLocaleTimeString("zh-CN", {
+    const date = new Date(value);
+    return date.toLocaleTimeString("zh-CN", {
       hour: "2-digit",
       minute: "2-digit",
+      second: date.getSeconds() ? "2-digit" : undefined,
       hour12: false,
     });
   }

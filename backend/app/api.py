@@ -10,9 +10,11 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 from app.config import Settings, get_settings
 from app.db import get_connection
 from app.models import (
+    AgentHealthResponse,
     CalendarMetaDayRead,
     CalendarMetaResponse,
     DailyBriefingResponse,
+    DueReminderListResponse,
     ConfirmOperationRequest,
     ConfirmOperationResponse,
     EventCreate,
@@ -26,6 +28,8 @@ from app.models import (
     MCPToolRequest,
     MCPToolResponse,
     NewsTodayResponse,
+    NotificationAcknowledgeRequest,
+    NotificationAcknowledgeResponse,
     OperationRead,
     TextCommandRequest,
     TextCommandResponse,
@@ -89,6 +93,12 @@ def get_asr_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ASRService:
     return ASRService(settings)
+
+
+def get_agent_parser(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ThirdPartyAgentParser:
+    return ThirdPartyAgentParser(settings)
 
 
 def get_mcp_tool_service(
@@ -169,6 +179,35 @@ def confirm_operation(
         raise HTTPException(status_code=404, detail="Operation not found") from exc
 
 
+@router.get("/notifications/due", response_model=DueReminderListResponse)
+def list_due_notifications(
+    channel: str = Query(...),
+    lookback_seconds: int = 300,
+    limit: int = 20,
+    now: datetime | None = Query(None),
+    service: CalendarService = Depends(get_calendar_service),
+) -> DueReminderListResponse:
+    return DueReminderListResponse(
+        items=service.list_due_reminders(
+            channel=channel,
+            now=now,
+            lookback_seconds=lookback_seconds,
+            limit=limit,
+        )
+    )
+
+
+@router.post("/notifications/ack", response_model=NotificationAcknowledgeResponse)
+def acknowledge_notification(
+    payload: NotificationAcknowledgeRequest,
+    service: CalendarService = Depends(get_calendar_service),
+) -> NotificationAcknowledgeResponse:
+    try:
+        return service.acknowledge_delivery(payload.delivery_id, payload.channel)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Notification delivery not found") from exc
+
+
 @router.post("/text/commands", response_model=TextCommandResponse)
 def handle_text_command(
     payload: TextCommandRequest,
@@ -190,6 +229,13 @@ def get_voice_capabilities(
         warming=health.warming,
         detail=health.detail,
     )
+
+
+@router.get("/agent/health", response_model=AgentHealthResponse)
+def get_agent_health(
+    agent: ThirdPartyAgentParser = Depends(get_agent_parser),
+) -> AgentHealthResponse:
+    return agent.health()
 
 
 @router.post("/voice/commands", response_model=VoiceCommandResponse)

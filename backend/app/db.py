@@ -53,6 +53,17 @@ CREATE TABLE IF NOT EXISTS news_items (
     language TEXT NOT NULL,
     hot_score REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    scheduled_at TEXT NOT NULL,
+    delivered_at TEXT,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(event_id, channel)
+);
 """
 
 

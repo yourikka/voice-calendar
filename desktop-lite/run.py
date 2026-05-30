@@ -11,8 +11,10 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 import webbrowser
@@ -32,6 +34,7 @@ except Exception:  # pragma: no cover
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OVERLAY_HTML = PROJECT_ROOT / "desktop-overlay" / "src" / "index.html"
 STATE_FILE = PROJECT_ROOT / ".desktop-lite-state.json"
+NOTIFY_LOG_FILE = PROJECT_ROOT / ".desktop-lite-notify.log"
 BACKEND_BASE_URL = "http://127.0.0.1:8000"
 DESKTOP_LITE_HTTP_PORT = None
 DEFAULT_BROWSER_CMD = os.getenv("VOICE_CALENDAR_BROWSER_CMD", "").strip()
@@ -86,9 +89,15 @@ class OverlayBridge:
         self._record_stderr_file: Path | None = None
         self._record_provider: str | None = None
         self._lock = Lock()
+        self._notification_thread: threading.Thread | None = None
+        self._notification_stop = threading.Event()
+        self._pending_overlay_notification: dict | None = None
+        self._log_notification("bridge init")
 
     def attach_window(self, window: webview.Window) -> None:
         self._window = window
+        self._log_notification("attach window")
+        self._start_notification_loop()
 
     def get_config(self) -> dict:
         return {
@@ -101,6 +110,12 @@ class OverlayBridge:
             "nativeAudioCapture": self._pick_recorder_command()[0] is not None,
         }
 
+    def get_pending_notification(self) -> dict | None:
+        with self._lock:
+            payload = self._pending_overlay_notification
+            self._pending_overlay_notification = None
+            return payload
+
     def _pick_recorder_command(self) -> tuple[list[str] | None, str | None]:
         parec = shutil.which("parec")
         if parec:
@@ -111,6 +126,82 @@ class OverlayBridge:
             return ([pw_record, "--rate", "16000", "--channels", "1"], "pw-record")
 
         return (None, None)
+
+    def _start_notification_loop(self) -> None:
+        if self._notification_thread and self._notification_thread.is_alive():
+            return
+        self._notification_stop.clear()
+        self._notification_thread = threading.Thread(
+            target=self._notification_loop,
+            name="voice-calendar-notify",
+            daemon=True,
+        )
+        self._notification_thread.start()
+        self._log_notification("thread started")
+
+    def stop(self) -> None:
+        self._notification_stop.set()
+
+    def _notification_loop(self) -> None:
+        while not self._notification_stop.is_set():
+            try:
+                self._log_notification("tick")
+                response = httpx.get(
+                    f"{self._backend_base_url}/api/notifications/due",
+                    params={"channel": "desktop-lite", "lookback_seconds": 600, "limit": 20},
+                    timeout=5.0,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                for item in payload.get("items", []):
+                    self._log_notification(f"due {json.dumps(item, ensure_ascii=False)}")
+                    self._notify_reminder(item)
+                    self._acknowledge_notification(item["delivery_id"])
+            except Exception as exc:
+                self._log_notification(f"poll error {exc}")
+            self._notification_stop.wait(1.0)
+
+    def _acknowledge_notification(self, delivery_id: str) -> None:
+        try:
+            httpx.post(
+                f"{self._backend_base_url}/api/notifications/ack",
+                json={"delivery_id": delivery_id, "channel": "desktop-lite"},
+                timeout=5.0,
+            )
+            self._log_notification(f"ack {delivery_id}")
+        except Exception:
+            self._log_notification(f"ack failed {delivery_id}")
+            return
+
+    def _notify_reminder(self, item: dict) -> None:
+        title = str(item.get("title") or "提醒")
+        start_at = str(item.get("start_at") or "")
+        body = title
+        if start_at:
+            try:
+                when = datetime.fromisoformat(start_at).strftime("%m-%d %H:%M:%S")
+                body = f"{when} {title}"
+            except Exception:
+                body = title
+        description = str(item.get("description") or "").strip()
+        if description:
+            body = f"{body}\n{description}"
+
+        with self._lock:
+            self._pending_overlay_notification = {
+                "title": "Voice Calendar 提醒",
+                "body": body,
+            }
+        self._log_notification(f"overlay-queued {body}")
+
+    def _log_notification(self, message: str) -> None:
+        timestamp = datetime.now().isoformat()
+        try:
+            with NOTIFY_LOG_FILE.open("a", encoding="utf-8") as handle:
+                handle.write(f"{timestamp} {message}\n")
+        except Exception:
+            return
+
 
     def call_mcp_tool(self, tool_name: str, arguments_payload: dict) -> dict:
         response = httpx.post(
@@ -495,19 +586,23 @@ def launch_overlay(backend_base_url: str) -> None:
         http_port=http_port,
     )
     bridge.attach_window(window)
-    webview.start(
-        gui="gtk",
-        debug=False,
-        http_server=True,
-        http_port=http_port,
-        private_mode=False,
-    )
+    try:
+        webview.start(
+            gui="gtk",
+            debug=False,
+            http_server=True,
+            http_port=http_port,
+            private_mode=False,
+        )
+    finally:
+        bridge.stop()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Lightweight desktop overlay for Voice Calendar.")
     parser.add_argument("--backend-base-url", default=BACKEND_BASE_URL)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--notify-test", action="store_true")
     return parser.parse_args()
 
 
@@ -526,6 +621,17 @@ def _relaunch_with_x11_if_wayland() -> None:
 def main() -> None:
     _relaunch_with_x11_if_wayland()
     args = parse_args()
+    if args.notify_test:
+        bridge = OverlayBridge(args.backend_base_url)
+        bridge._notify_reminder(
+            {
+                "title": "桌面通知测试",
+                "description": "如果你没看见这一条，说明系统通知层有问题。",
+                "start_at": datetime.now().astimezone().isoformat(),
+            }
+        )
+        print("notify-test sent")
+        return
     if args.check:
         bridge = OverlayBridge(args.backend_base_url)
         print(json.dumps(bridge.get_config(), ensure_ascii=False))

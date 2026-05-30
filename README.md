@@ -90,6 +90,27 @@ export VOICE_AGENT_API_KEY="your-agent-key"
 export VOICE_AGENT_MODEL="your-agent-model"
 ```
 
+You can also configure the agent fallback through a local `.env` file at the repo root.
+Start from `.env.example` and fill in the agent values:
+
+```bash
+cp .env.example .env
+```
+
+Required agent keys:
+
+- `VOICE_AGENT_API_URL`
+- `VOICE_AGENT_API_KEY`
+- `VOICE_AGENT_MODEL`
+
+Optional agent keys:
+
+- `VOICE_AGENT_PROVIDER`
+- `VOICE_AGENT_TIMEOUT_SECONDS`
+
+The backend loads `.env` automatically on startup. When rule-based parsing is uncertain or returns `unknown`,
+the command pipeline will fall back to the configured third-party agent parser.
+
 ## Implemented MVP
 
 - Health check: `GET /api/health`

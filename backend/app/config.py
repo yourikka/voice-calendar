@@ -4,6 +4,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
+
 
 def _env_bool(name: str, default: str) -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
@@ -30,7 +36,7 @@ class Settings:
     agent_api_key: str | None = None
     agent_model: str | None = None
     agent_provider: str = "openai-compatible"
-    agent_timeout_seconds: float = 20.0
+    agent_timeout_seconds: float = 8.0
 
 
 def get_settings() -> Settings:
@@ -53,5 +59,5 @@ def get_settings() -> Settings:
         agent_api_key=os.getenv("VOICE_AGENT_API_KEY"),
         agent_model=os.getenv("VOICE_AGENT_MODEL"),
         agent_provider=os.getenv("VOICE_AGENT_PROVIDER", "openai-compatible"),
-        agent_timeout_seconds=float(os.getenv("VOICE_AGENT_TIMEOUT_SECONDS", "20")),
+        agent_timeout_seconds=float(os.getenv("VOICE_AGENT_TIMEOUT_SECONDS", "8")),
     )

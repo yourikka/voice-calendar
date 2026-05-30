@@ -40,6 +40,10 @@ def _slot_datetime(date_text: str, time_text: str, timezone_name: str) -> dateti
     return datetime.combine(date.fromisoformat(date_text), time.fromisoformat(time_text), tzinfo=zone)
 
 
+def _format_datetime_text(value: datetime) -> str:
+    return value.strftime("%m月%d日%H:%M:%S" if value.second else "%m月%d日%H:%M")
+
+
 def _build_reminders(offset_minutes: int | None, default_zero: bool = False) -> list[Reminder]:
     if offset_minutes is None and not default_zero:
         return []
@@ -102,10 +106,12 @@ class TextCommandService:
 
     def handle(self, request: TextCommandRequest) -> TextCommandResponse:
         session_id = _session_id(request.session_id)
-        parsed = self.parse(request)
         pending = _get_pending_command(session_id)
         if pending is not None:
+            parsed = self.parser.parse_rule_only(request)
             parsed = self._merge_pending_command(request, parsed, pending.parsed)
+            return self._execute(request, parsed, session_id)
+        parsed = self.parse(request)
         return self._execute(request, parsed, session_id)
 
     def _response(
@@ -212,7 +218,7 @@ class TextCommandService:
                 parsed,
                 session_id,
                 state="completed",
-                reply_text=f"已设置{start_at.strftime('%m月%d日%H:%M')}提醒你{title}。",
+                reply_text=f"已设置{_format_datetime_text(start_at)}提醒你{title}。",
                 event=created.event,
             )
 
@@ -242,7 +248,7 @@ class TextCommandService:
                 parsed,
                 session_id,
                 state="completed",
-                reply_text=f"已创建{start_at.strftime('%m月%d日%H:%M')}的{title}{conflict_text}。",
+                reply_text=f"已创建{_format_datetime_text(start_at)}的{title}{conflict_text}。",
                 event=created.event,
             )
 
@@ -360,7 +366,7 @@ class TextCommandService:
                 parsed,
                 session_id,
                 state="completed",
-                reply_text=f"已将{updated.event.title}改到{start_at.strftime('%m月%d日%H:%M')}{conflict_text}。",
+                reply_text=f"已将{updated.event.title}改到{_format_datetime_text(start_at)}{conflict_text}。",
                 event=updated.event,
             )
 
@@ -388,6 +394,16 @@ class TextCommandService:
         parsed: ParsedCommand,
         pending: ParsedCommand,
     ) -> ParsedCommand:
+        if parsed.intent == "unknown":
+            parsed = ParsedCommand(
+                transcript=request.text,
+                normalized_text=normalize_text(request.text),
+                intent=pending.intent,
+                slots={},
+                missing_fields=list(pending.missing_fields),
+                parser="rule+context",
+                confidence=0.4,
+            )
         if parsed.intent not in {"unknown", pending.intent} and not parsed.missing_fields:
             return parsed
         if pending.intent == "create_event":

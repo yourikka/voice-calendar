@@ -17,6 +17,7 @@ const backendText = document.querySelector("#backend-text");
 const stateText = document.querySelector("#state-text");
 const replyText = document.querySelector("#reply-text");
 const replyMessage = document.querySelector("#reply-message");
+const parserSource = document.querySelector("#parser-source");
 const voiceProvider = document.querySelector("#voice-provider");
 const toolChecklist = document.querySelector("#tool-checklist");
 const transcriptText = document.querySelector("#transcript-text");
@@ -55,6 +56,7 @@ function blobToBase64(blob) {
 function createPywebviewOverlayAPI(api) {
   return {
     getConfig: () => api.get_config(),
+    getPendingNotification: () => api.get_pending_notification(),
     openCalendar: () => api.open_calendar(),
     callMcpTool: (toolName, argumentsPayload) => api.call_mcp_tool(toolName, argumentsPayload),
     setMode: (mode, contentHeight, contentWidth) => api.set_mode(mode, contentHeight, contentWidth),
@@ -93,6 +95,22 @@ async function bootstrap() {
   renderToolChecklist();
   setToolPanelExpanded(false);
   await setMode("compact");
+  window.setInterval(async () => {
+    try {
+      const pending = await overlayAPI.getPendingNotification();
+      if (pending?.title || pending?.body) {
+        stateText.textContent = "提醒";
+        replyText.textContent = pending.body || pending.title || "到点了";
+        replyMessage.textContent = pending.title || "提醒";
+        transcriptText.textContent = pending.body || "到点了";
+        parserSource.textContent = "解析来源：到点提醒";
+        voiceProvider.textContent = "本地提醒";
+        await setMode("expanded");
+      }
+    } catch (error) {
+      // Ignore polling errors to avoid breaking the overlay UI loop.
+    }
+  }, 1000);
 }
 
 async function setMode(mode) {
@@ -249,11 +267,13 @@ function buildVoicePayload(audioBase64, contentType) {
 }
 
 function formatCandidateTime(value) {
-  return new Date(value).toLocaleString("zh-CN", {
+  const date = new Date(value);
+  return date.toLocaleString("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: date.getSeconds() ? "2-digit" : undefined,
     hour12: false,
   });
 }
@@ -274,14 +294,26 @@ function formatEventSummary(event) {
   if (!event?.start_at) {
     return "";
   }
-  const when = new Date(event.start_at).toLocaleString("zh-CN", {
+  const start = new Date(event.start_at);
+  const when = start.toLocaleString("zh-CN", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: start.getSeconds() ? "2-digit" : undefined,
     hour12: false,
   });
   return `${when} ${event.title || ""}`.trim();
+}
+
+function describeParserSource(parser) {
+  if (!parser || parser === "rule" || parser === "rule+context") {
+    return "解析来源：规则";
+  }
+  if (String(parser).startsWith("agent:")) {
+    return "解析来源：Agent fallback";
+  }
+  return `解析来源：${parser}`;
 }
 
 function applyAgentResult(result) {
@@ -308,6 +340,7 @@ function applyAgentResult(result) {
   replyText.textContent = reply;
   replyMessage.textContent = reply;
   transcriptText.textContent = transcript;
+  parserSource.textContent = describeParserSource(result.parser);
 
   candidatePanel.hidden = true;
   confirmationPanel.hidden = true;
@@ -511,6 +544,7 @@ async function handleVoiceBlob(blob) {
     const message = String(error.message || error);
     replyText.textContent = message;
     replyMessage.textContent = message;
+    parserSource.textContent = "解析来源：未完成";
   } finally {
     setIdle();
   }
@@ -533,6 +567,7 @@ async function undoLastOperation() {
     const message = String(error.message || error);
     replyText.textContent = message;
     replyMessage.textContent = message;
+    parserSource.textContent = "解析来源：未完成";
   } finally {
     setIdle();
   }
@@ -561,6 +596,7 @@ async function confirmPendingOperation(confirmed) {
     const message = String(error.message || error);
     replyText.textContent = message;
     replyMessage.textContent = message;
+    parserSource.textContent = "解析来源：未完成";
   } finally {
     setIdle();
   }
@@ -656,6 +692,7 @@ recordButton.addEventListener("click", async () => {
     const message = String(error.message || error);
     replyText.textContent = message;
     replyMessage.textContent = message;
+    parserSource.textContent = "解析来源：未完成";
     setIdle();
   }
 });
@@ -682,4 +719,5 @@ bootstrap().catch((error) => {
   const message = String(error.message || error);
   replyText.textContent = message;
   replyMessage.textContent = message;
+  parserSource.textContent = "解析来源：未初始化";
 });

@@ -9,10 +9,12 @@ from app.models import (
     Candidate,
     Conflict,
     ConfirmOperationResponse,
+    DueReminderRead,
     EventCreate,
     EventCreateResponse,
     EventRead,
     EventUpdate,
+    NotificationAcknowledgeResponse,
     OperationRead,
     UndoResponse,
 )
@@ -64,6 +66,92 @@ def _event_to_dict(event: EventRead) -> dict:
 class CalendarService:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+
+    def list_due_reminders(
+        self,
+        *,
+        channel: str,
+        now: datetime | None = None,
+        lookback_seconds: int = 300,
+        limit: int = 20,
+    ) -> list[DueReminderRead]:
+        current = now or _utc_now()
+        window_start = current - timedelta(seconds=lookback_seconds)
+        rows = self.conn.execute(
+            """
+            SELECT
+                e.id AS event_id,
+                e.title,
+                e.description,
+                e.start_at,
+                e.timezone,
+                e.source,
+                nd.id AS delivery_id
+            FROM events e
+            LEFT JOIN notification_deliveries nd
+              ON nd.event_id = e.id AND nd.channel = ?
+            WHERE e.deleted_at IS NULL
+              AND e.status = 'confirmed'
+              AND e.type = 'reminder'
+              AND nd.id IS NULL
+            ORDER BY e.start_at ASC
+            """,
+            (channel,),
+        ).fetchall()
+
+        reminders: list[DueReminderRead] = []
+        with self.conn:
+            for row in rows:
+                start_at = datetime.fromisoformat(row["start_at"])
+                if start_at < window_start or start_at > current:
+                    continue
+                delivery_id = _new_id("notify")
+                self.conn.execute(
+                    """
+                    INSERT INTO notification_deliveries (
+                        id, event_id, channel, scheduled_at, delivered_at, status, created_at
+                    ) VALUES (?, ?, ?, ?, NULL, 'pending', ?)
+                    """,
+                    (
+                        delivery_id,
+                        row["event_id"],
+                        channel,
+                        start_at.isoformat(),
+                        current.isoformat(),
+                    ),
+                )
+                reminders.append(
+                    DueReminderRead(
+                        delivery_id=delivery_id,
+                        event_id=row["event_id"],
+                        title=row["title"],
+                        description=row["description"] or "",
+                        start_at=start_at,
+                        timezone=row["timezone"],
+                        source=row["source"],
+                    )
+                )
+                if len(reminders) >= limit:
+                    break
+        return reminders
+
+    def acknowledge_delivery(self, delivery_id: str, channel: str) -> NotificationAcknowledgeResponse:
+        row = self.conn.execute(
+            "SELECT id FROM notification_deliveries WHERE id = ? AND channel = ?",
+            (delivery_id, channel),
+        ).fetchone()
+        if row is None:
+            raise KeyError(delivery_id)
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE notification_deliveries
+                SET status = 'delivered', delivered_at = ?
+                WHERE id = ? AND channel = ?
+                """,
+                (_utc_now().isoformat(), delivery_id, channel),
+            )
+        return NotificationAcknowledgeResponse(status="delivered")
 
     def create_event(self, payload: EventCreate) -> EventCreateResponse:
         now = _utc_now()
