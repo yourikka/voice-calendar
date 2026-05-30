@@ -5,9 +5,10 @@ from typing import Any, AsyncIterator
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from app.api import get_command_parser
+from app.api import get_asr_service, get_command_parser
 from app.config import get_settings
 from app.db import get_connection_context, initialize_database
+from app.services.asr import ASRService
 from app.services.mcp import MCPToolService
 
 
@@ -18,7 +19,10 @@ MCP_INSTRUCTIONS = (
 )
 
 
-def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
+def build_mcp_server(
+    streamable_http_path: str = "/mcp",
+    asr: ASRService | None = None,
+) -> FastMCP:
     settings = get_settings()
 
     @asynccontextmanager
@@ -26,7 +30,8 @@ def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
         initialize_database(settings)
         with get_connection_context(settings) as conn:
             parser = get_command_parser(settings)
-            yield {"tool_service": MCPToolService(conn, parser=parser)}
+            active_asr = asr or get_asr_service(settings)
+            yield {"tool_service": MCPToolService(conn, parser=parser, asr=active_asr)}
 
     server = FastMCP(
         name="voice-calendar",
@@ -100,10 +105,57 @@ def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
         )
 
     @server.tool(
+        name="calendar.get_event",
+        description="Get a single event by event_id.",
+    )
+    def get_calendar_event(event_id: str, ctx: Context = None) -> dict[str, Any]:
+        return _call(ctx, "calendar.get_event", {"event_id": event_id})
+
+    @server.tool(
+        name="calendar.create_event",
+        description="Create an event or reminder in the primary calendar and return the created event.",
+    )
+    def create_calendar_event_direct(
+        title: str,
+        start_at: str,
+        end_at: str | None = None,
+        timezone: str = "Asia/Shanghai",
+        type: str = "event",
+        description: str = "",
+        location: str | None = None,
+        participants: list[str] | None = None,
+        reminders: list[dict[str, Any]] | None = None,
+        recurrence_rule: dict[str, Any] | None = None,
+        calendar_id: str = "primary",
+        source: str = "mcp",
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "calendar.create_event",
+            _drop_none(
+                {
+                    "title": title,
+                    "start_at": start_at,
+                    "end_at": end_at,
+                    "timezone": timezone,
+                    "type": type,
+                    "description": description,
+                    "location": location,
+                    "participants": participants or [],
+                    "reminders": reminders or [],
+                    "recurrence_rule": recurrence_rule,
+                    "calendar_id": calendar_id,
+                    "source": source,
+                }
+            ),
+        )
+
+    @server.tool(
         name="calendar.create_event_draft",
         description="Create an event or reminder in the primary calendar.",
     )
-    def create_calendar_event(
+    def create_calendar_event_draft(
         title: str,
         start_at: str,
         end_at: str | None = None,
@@ -176,10 +228,53 @@ def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
         )
 
     @server.tool(
+        name="calendar.update_event",
+        description="Update an existing calendar event by event_id and return the updated event.",
+    )
+    def update_calendar_event_direct(
+        event_id: str,
+        title: str | None = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+        timezone: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
+        participants: list[str] | None = None,
+        reminders: list[dict[str, Any]] | None = None,
+        recurrence_rule: dict[str, Any] | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "calendar.update_event",
+            _drop_none(
+                {
+                    "event_id": event_id,
+                    "title": title,
+                    "start_at": start_at,
+                    "end_at": end_at,
+                    "timezone": timezone,
+                    "description": description,
+                    "location": location,
+                    "participants": participants,
+                    "reminders": reminders,
+                    "recurrence_rule": recurrence_rule,
+                }
+            ),
+        )
+
+    @server.tool(
+        name="calendar.delete_event",
+        description="Delete a calendar event immediately by event_id.",
+    )
+    def delete_calendar_event_direct(event_id: str, ctx: Context = None) -> dict[str, Any]:
+        return _call(ctx, "calendar.delete_event", {"event_id": event_id})
+
+    @server.tool(
         name="calendar.delete_event_draft",
         description="Create a deletion draft for a calendar event. Requires confirmation.",
     )
-    def delete_calendar_event(event_id: str, ctx: Context = None) -> dict[str, Any]:
+    def delete_calendar_event_draft(event_id: str, ctx: Context = None) -> dict[str, Any]:
         return _call(ctx, "calendar.delete_event_draft", {"event_id": event_id})
 
     @server.tool(
@@ -247,6 +342,58 @@ def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
         )
 
     @server.tool(
+        name="news.refresh_hot_topics",
+        description="Refresh the cached hot topics feed.",
+    )
+    def refresh_hot_topics(
+        date: str | None = None,
+        timezone: str = "Asia/Shanghai",
+        region: str = "CN",
+        categories: list[str] | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "news.refresh_hot_topics",
+            _drop_none(
+                {
+                    "date": date,
+                    "timezone": timezone,
+                    "region": region,
+                    "categories": categories or ["general", "technology", "finance"],
+                }
+            ),
+        )
+
+    @server.tool(
+        name="calendar.get_hot_topic_panel",
+        description="Get the hot-topic side panel data for a calendar date.",
+    )
+    def get_hot_topic_panel(
+        date: str,
+        timezone: str = "Asia/Shanghai",
+        limit: int = 5,
+        region: str = "CN",
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "calendar.get_hot_topic_panel",
+            {"date": date, "timezone": timezone, "limit": limit, "region": region},
+        )
+
+    @server.tool(
+        name="calendar.get_meta",
+        description="Get calendar meta such as holidays and solar terms for a date range.",
+    )
+    def get_calendar_meta(
+        start: str,
+        end: str,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(ctx, "calendar.get_meta", {"start": start, "end": end})
+
+    @server.tool(
         name="briefing.get_daily_briefing",
         description="Get a daily briefing combining schedule context and hot topics.",
     )
@@ -256,6 +403,65 @@ def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
         ctx: Context = None,
     ) -> dict[str, Any]:
         return _call(ctx, "briefing.get_daily_briefing", {"date": date, "timezone": timezone})
+
+    @server.tool(
+        name="voice.get_capabilities",
+        description="Get backend ASR availability and readiness information.",
+    )
+    def get_voice_capabilities(ctx: Context = None) -> dict[str, Any]:
+        return _call(ctx, "voice.get_capabilities", {})
+
+    @server.tool(
+        name="voice.transcribe_audio",
+        description="Transcribe base64-encoded audio into text.",
+    )
+    def transcribe_audio(
+        audio_base64: str,
+        filename: str = "voice-input.webm",
+        content_type: str = "application/octet-stream",
+        locale: str = "zh-CN",
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "voice.transcribe_audio",
+            {
+                "audio_base64": audio_base64,
+                "filename": filename,
+                "content_type": content_type,
+                "locale": locale,
+            },
+        )
+
+    @server.tool(
+        name="voice.handle_command",
+        description="Transcribe base64-encoded audio and execute it as a voice calendar command.",
+    )
+    def handle_voice_command(
+        audio_base64: str,
+        filename: str = "voice-input.webm",
+        content_type: str = "application/octet-stream",
+        timezone: str = "Asia/Shanghai",
+        locale: str = "zh-CN",
+        session_id: str | None = None,
+        now: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "voice.handle_command",
+            _drop_none(
+                {
+                    "audio_base64": audio_base64,
+                    "filename": filename,
+                    "content_type": content_type,
+                    "timezone": timezone,
+                    "locale": locale,
+                    "session_id": session_id,
+                    "now": now,
+                }
+            ),
+        )
 
     return server
 

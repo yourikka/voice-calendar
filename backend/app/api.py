@@ -94,8 +94,9 @@ def get_asr_service(
 def get_mcp_tool_service(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
     parser: HybridCommandParser = Depends(get_command_parser),
+    asr: ASRService = Depends(get_asr_service),
 ) -> MCPToolService:
-    return MCPToolService(conn, parser=parser)
+    return MCPToolService(conn, parser=parser, asr=asr)
 
 
 @router.get("/events", response_model=EventListResponse)

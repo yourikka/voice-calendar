@@ -1,27 +1,18 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-async function postAudio(url, blob, locale = "zh-CN") {
-  const formData = new FormData();
-  formData.append("audio", new File([blob], "voice-input.webm", { type: blob.type || "audio/webm" }));
-  formData.append("locale", locale);
-
-  const response = await fetch(url, {
-    method: "POST",
-    body: formData,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.detail || data.error || "语音请求失败");
+async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
   }
-  return data;
+  return btoa(binary);
 }
 
 contextBridge.exposeInMainWorld("overlayAPI", {
   getConfig: () => ipcRenderer.invoke("overlay:config"),
   openCalendar: () => ipcRenderer.invoke("overlay:open-calendar"),
   callMcpTool: (toolName, argumentsPayload) => ipcRenderer.invoke("overlay:call-mcp-tool", toolName, argumentsPayload),
-  transcribeAudio: async (blob, locale) => {
-    const { backendBaseUrl } = await ipcRenderer.invoke("overlay:config");
-    return postAudio(`${backendBaseUrl}/api/voice/transcriptions`, blob, locale);
-  },
+  audioToBase64: (blob) => blobToBase64(blob),
 });

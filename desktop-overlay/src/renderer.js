@@ -84,11 +84,23 @@ async function stopRecording() {
 
 async function transcribeAndSend(blob) {
   try {
-    const response = await window.overlayAPI.transcribeAudio(blob, "zh-CN");
-    transcriptText.textContent = response.transcript || "";
-    voiceProvider.textContent = response.asr_provider || "unknown";
-    commandInput.value = response.transcript || "";
-    await sendCommand(response.transcript || "");
+    const audioBase64 = await window.overlayAPI.audioToBase64(blob);
+    const result = await window.overlayAPI.callMcpTool("voice.handle_command", {
+      audio_base64: audioBase64,
+      filename: "voice-input.webm",
+      content_type: blob.type || "audio/webm",
+      timezone: "Asia/Shanghai",
+      locale: "zh-CN",
+      session_id: sessionId,
+      now: new Date().toISOString(),
+    });
+    sessionId = result.session_id || sessionId;
+    transcriptText.textContent = result.transcript || "";
+    voiceProvider.textContent = result.asr_provider || "unknown";
+    commandInput.value = result.transcript || "";
+    intentText.textContent = result.intent || "unknown";
+    resultText.textContent = JSON.stringify(result, null, 2);
+    setIdle();
   } catch (error) {
     transcriptText.textContent = String(error.message || error);
     voiceProvider.textContent = "error";

@@ -119,8 +119,8 @@ Default behavior:
 
 - Always-on-top frameless desktop window
 - Text command entry that calls `calendar.handle_command`
-- Voice recording that uploads audio to `/api/voice/transcriptions`
-- Transcribed text is then executed through the same MCP command tool
+- Voice recording that base64-encodes audio and calls `voice.handle_command`
+- Text and voice now both execute through MCP tools
 - "打开日历" opens the full Web workspace in the browser
 
 Optional backend override:
@@ -164,3 +164,16 @@ curl -X POST http://127.0.0.1:8000/api/mcp/tools/news.get_today_hot_topics \
   -H 'Content-Type: application/json' \
   -d '{"arguments":{"timezone":"Asia/Shanghai","limit":3,"fresh":true}}'
 ```
+
+Web-facing backend capabilities are also exposed through MCP tools, including:
+
+- `calendar.get_event`
+- `calendar.create_event`
+- `calendar.update_event`
+- `calendar.delete_event`
+- `calendar.get_meta`
+- `calendar.get_hot_topic_panel`
+- `news.refresh_hot_topics`
+- `voice.get_capabilities`
+- `voice.transcribe_audio`
+- `voice.handle_command`
