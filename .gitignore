@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 backend/data/
 *.egg-info/
+.desktop-lite-state.json
+desktop-lite/__pycache__/

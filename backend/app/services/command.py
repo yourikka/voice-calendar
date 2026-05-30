@@ -263,6 +263,7 @@ class TextCommandService:
             start = datetime.fromisoformat(parsed.slots["start"])
             end = datetime.fromisoformat(parsed.slots["end"])
             keyword = parsed.slots.get("title", "")
+            delete_all = bool(parsed.slots.get("delete_all"))
             candidates = self.calendar.find_events_by_title(keyword or "", start, end)
             if not candidates:
                 return self._response(
@@ -271,6 +272,30 @@ class TextCommandService:
                     session_id,
                     state="not_found",
                     reply_text="没有找到匹配的日程。",
+                )
+            if delete_all:
+                if len(candidates) == 1:
+                    operation = self.calendar.create_delete_draft(candidates[0].id)
+                    return self._response(
+                        request,
+                        parsed,
+                        session_id,
+                        state="awaiting_confirmation",
+                        reply_text=f"找到{candidates[0].title}，确认取消吗？",
+                        requires_user_input=True,
+                        operation_id=operation.id,
+                        candidates=candidates,
+                    )
+                operation = self.calendar.create_delete_many_draft([candidate.id for candidate in candidates])
+                return self._response(
+                    request,
+                    parsed,
+                    session_id,
+                    state="awaiting_confirmation",
+                    reply_text=f"找到 {len(candidates)} 个日程，确认全部取消吗？",
+                    requires_user_input=True,
+                    operation_id=operation.id,
+                    candidates=candidates,
                 )
             if len(candidates) > 1:
                 return self._response(

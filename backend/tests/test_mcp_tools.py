@@ -185,6 +185,31 @@ def test_mcp_voice_tools_reuse_asr_and_command_pipeline(client: TestClient) -> N
         app.dependency_overrides.pop(get_asr_service, None)
 
 
+def test_mcp_voice_handle_command_accepts_utc_z_timestamp(client: TestClient) -> None:
+    app.dependency_overrides[get_asr_service] = lambda: FakeASRService()
+    try:
+        audio_base64 = base64.b64encode(b"fake-audio").decode("ascii")
+        response = client.post(
+            "/api/mcp/tools/voice.handle_command",
+            json={
+                "arguments": {
+                    "audio_base64": audio_base64,
+                    "filename": "voice.webm",
+                    "content_type": "audio/webm",
+                    "timezone": "Asia/Shanghai",
+                    "locale": "zh-CN",
+                    "now": "2026-05-30T06:41:26.191Z",
+                }
+            },
+        )
+        assert response.status_code == 200
+        result = response.json()["result"]
+        assert result["asr_provider"] == "fake-asr"
+        assert result["intent"] == "create_reminder"
+    finally:
+        app.dependency_overrides.pop(get_asr_service, None)
+
+
 def test_mcp_resolve_candidate_supports_delete_confirmation_flow(client: TestClient) -> None:
     first = client.post(
         "/api/events",

@@ -92,6 +92,7 @@ class ConfirmOperationRequest(BaseModel):
 class ConfirmOperationResponse(BaseModel):
     state: str
     event: EventRead | None = None
+    deleted_count: int | None = None
     reply_text: str
 
 

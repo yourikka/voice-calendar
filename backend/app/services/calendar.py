@@ -197,13 +197,25 @@ class CalendarService:
 
     def create_delete_draft(self, event_id: str) -> OperationRead:
         before = self.get_event(event_id)
-        return self._log_operation(
-            "delete_event",
-            event_id,
-            _event_to_dict(before),
-            None,
-            state="awaiting_confirmation",
-        )
+        with self.conn:
+            return self._log_operation(
+                "delete_event",
+                event_id,
+                _event_to_dict(before),
+                None,
+                state="awaiting_confirmation",
+            )
+
+    def create_delete_many_draft(self, event_ids: list[str]) -> OperationRead:
+        before = [_event_to_dict(self.get_event(event_id)) for event_id in event_ids]
+        with self.conn:
+            return self._log_operation(
+                "delete_events",
+                None,
+                before,
+                None,
+                state="awaiting_confirmation",
+            )
 
     def confirm_operation(self, operation_id: str, confirmed: bool) -> ConfirmOperationResponse:
         row = self.conn.execute(
@@ -228,21 +240,41 @@ class CalendarService:
 
         operation = row["operation"]
         target_event_id = row["target_event_id"]
+        before = _load_json(row["before_json"], None)
         event: EventRead | None = None
+        deleted_count = None
         with self.conn:
             if operation == "delete_event" and target_event_id:
                 self.conn.execute(
                     "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
                     (_utc_now().isoformat(), _utc_now().isoformat(), target_event_id),
                 )
+                if before:
+                    event = EventRead.model_validate(before)
+                deleted_count = 1
+            elif operation == "delete_events" and isinstance(before, list):
+                now = _utc_now().isoformat()
+                for item in before:
+                    self.conn.execute(
+                        "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
+                        (now, now, item["id"]),
+                    )
+                deleted_count = len(before)
             self.conn.execute(
                 "UPDATE operation_logs SET state = 'completed' WHERE id = ?",
                 (operation_id,),
             )
+        if deleted_count and deleted_count > 1:
+            reply_text = f"已删除 {deleted_count} 个日程。"
+        elif event:
+            reply_text = f"已删除{event.title}。"
+        else:
+            reply_text = "已执行操作。"
         return ConfirmOperationResponse(
             state="completed",
             event=event,
-            reply_text="已执行操作。",
+            deleted_count=deleted_count,
+            reply_text=reply_text,
         )
 
     def find_events_by_title(
@@ -300,6 +332,9 @@ class CalendarService:
                     "UPDATE events SET deleted_at = ?, status = 'cancelled' WHERE id = ?",
                     (_utc_now().isoformat(), after["id"]),
                 )
+            elif operation == "delete_events" and isinstance(before, list):
+                for item in before:
+                    self._restore_event(item)
             elif operation in {"delete_event", "update_event"} and before:
                 self._restore_event(before)
                 event = self.get_event(before["id"])

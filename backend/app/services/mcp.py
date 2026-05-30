@@ -26,6 +26,13 @@ from app.services.news import NewsService
 from app.services.nlu import HybridCommandParser
 
 
+def _parse_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    return datetime.fromisoformat(normalized)
+
+
 class MCPToolService:
     def __init__(
         self,
@@ -63,7 +70,7 @@ class MCPToolService:
                     timezone=arguments.get("timezone", "Asia/Shanghai"),
                     locale=arguments.get("locale", "zh-CN"),
                     session_id=arguments.get("session_id"),
-                    now=datetime.fromisoformat(arguments["now"]) if arguments.get("now") else None,
+                    now=_parse_datetime(arguments["now"]) if arguments.get("now") else None,
                 )
             )
             payload = result.model_dump(mode="json")
@@ -73,8 +80,8 @@ class MCPToolService:
 
         if tool_name == "calendar.list_events":
             result = self.calendar.list_events(
-                start=datetime.fromisoformat(arguments["start"]),
-                end=datetime.fromisoformat(arguments["end"]),
+                start=_parse_datetime(arguments["start"]),
+                end=_parse_datetime(arguments["end"]),
                 calendar_id=arguments.get("calendar_id", "primary"),
             )
             return self._response(tool_name, {"items": [item.model_dump(mode="json") for item in result]})
@@ -162,8 +169,8 @@ class MCPToolService:
 
         if tool_name == "calendar.check_availability":
             conflicts = self.calendar.check_conflicts(
-                start_at=datetime.fromisoformat(arguments["start_at"]),
-                end_at=datetime.fromisoformat(arguments.get("end_at")) if arguments.get("end_at") else None,
+                start_at=_parse_datetime(arguments["start_at"]),
+                end_at=_parse_datetime(arguments.get("end_at")) if arguments.get("end_at") else None,
                 calendar_id=arguments.get("calendar_id", "primary"),
             )
             return self._response(

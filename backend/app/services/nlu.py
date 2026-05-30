@@ -72,6 +72,9 @@ CHINESE_TIME_RE = re.compile(
     rf"({TIME_PREFIX_RE})([零一二两三四五六七八九十\d]{{1,3}})点(半|[零一二三四五六七八九十\d]{{1,3}}分?)?"
 )
 EXPLICIT_DATE_RE = re.compile(r"(?:(\d{4})年)?(\d{1,2})月(\d{1,2})[日号]?")
+CHINESE_EXPLICIT_DATE_RE = re.compile(
+    r"(?:(\d{4})年)?([零一二两三四五六七八九十]{1,3})月([零一二两三四五六七八九十]{1,3})[日号]?"
+)
 SLASH_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})")
 WEEKDAY_RE = re.compile(r"(下下周|下周|下个周|这周|本周|周|星期)([一二三四五六日天])")
 UPDATE_ACTION_RE = re.compile(r"(改到|改成|改为|挪到|挪成|调整到|推迟到|提前到)")
@@ -183,6 +186,13 @@ def _resolve_date(text: str, base: datetime) -> date | None:
         year = int(explicit.group(1)) if explicit.group(1) else base.year
         return date(year, int(explicit.group(2)), int(explicit.group(3)))
 
+    chinese_explicit = CHINESE_EXPLICIT_DATE_RE.search(text)
+    if chinese_explicit:
+        year = int(chinese_explicit.group(1)) if chinese_explicit.group(1) else base.year
+        month = _parse_chinese_number(chinese_explicit.group(2))
+        day = _parse_chinese_number(chinese_explicit.group(3))
+        return date(year, month, day)
+
     slash = SLASH_DATE_RE.search(text)
     if slash:
         return date(base.year, int(slash.group(1)), int(slash.group(2)))
@@ -283,21 +293,29 @@ def _cleanup_title(value: str) -> str:
 def _extract_reminder_title(text: str) -> str:
     marker = "提醒我" if "提醒我" in text else "提醒"
     _, _, title = text.partition(marker)
+    title = _remove_time_and_date_tokens(title)
+    title = re.sub(r"^(去|要去|需要去|记得去)", "", title)
+    title = re.sub(r"^(一下|一下子)", "", title)
     title = _cleanup_title(title)
     return title or "未命名提醒"
 
 
 def _extract_event_title(text: str) -> str:
+    if "会议" in text or "開會" in text or "开会" in text or "有会" in text:
+        return "会议"
     meeting_match = re.search(r"开(.+?会)", text)
     if meeting_match:
         title = _cleanup_title(meeting_match.group(1))
         return "会议" if title in {"", "会"} else title
     if "面试" in text:
         return "面试"
+    if "健身" in text:
+        return "健身"
     cleaned = _remove_time_and_date_tokens(text)
     cleaned = re.sub(r"(提醒我|通知我)", "", cleaned)
-    cleaned = re.sub(r"^(有个|有场|有次|有一场|有一个|要开个|要开场|要开次)", "", cleaned)
+    cleaned = re.sub(r"^(有个|有场|有次|有一场|有一个|有|要开个|要开场|要开次)", "", cleaned)
     cleaned = re.sub(r"^(和|跟|与)[^，,。]+?(开|见|聊|讨论|沟通)", "", cleaned)
+    cleaned = re.sub(r"^(早上|上午|中午|下午|晚上|今晚|今早|明早|明晚)", "", cleaned)
     cleaned = _cleanup_title(cleaned)
     if cleaned.startswith("开") and len(cleaned) > 1:
         cleaned = cleaned[1:]
@@ -317,6 +335,7 @@ def _extract_participants(text: str) -> list[str]:
 def _extract_delete_title(text: str) -> str:
     keyword = re.sub(r"^(取消|删除|去掉)", "", text)
     keyword = _remove_time_and_date_tokens(keyword)
+    keyword = re.sub(r"(所有|全部)", "", keyword)
     keyword = re.sub(r"(安排|日程|提醒|事件)", "", keyword)
     return _cleanup_title(keyword)
 
@@ -462,6 +481,7 @@ class RuleBasedCommandParser:
 
     def _parse_delete(self, request: TextCommandRequest, text: str, base: datetime) -> ParsedCommand:
         start, end = _resolve_window(text, base)
+        delete_all = bool(re.search(r"(所有|全部)", text))
         return ParsedCommand(
             transcript=request.text,
             normalized_text=text,
@@ -470,6 +490,7 @@ class RuleBasedCommandParser:
                 "title": _extract_delete_title(text),
                 "start": start.isoformat(),
                 "end": end.isoformat(),
+                "delete_all": delete_all,
             },
             confidence=0.91,
         )

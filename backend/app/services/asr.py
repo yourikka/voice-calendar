@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import audioop
 import os
 import threading
+import wave
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import import_module
@@ -50,6 +52,46 @@ class _WarmupState:
 _WARMUP_LOCK = threading.Lock()
 _WARMUP_STATE: dict[tuple[str, str | None, str, str], _WarmupState] = {}
 
+_TRADITIONAL_TO_SIMPLIFIED = str.maketrans(
+    {
+        "會": "会",
+        "議": "议",
+        "點": "点",
+        "號": "号",
+        "鐘": "钟",
+        "臺": "台",
+        "個": "个",
+        "這": "这",
+        "裡": "里",
+        "說": "说",
+        "話": "话",
+        "時": "时",
+        "間": "间",
+        "氣": "气",
+        "體": "体",
+        "週": "周",
+        "為": "为",
+        "開": "开",
+        "門": "门",
+        "辦": "办",
+        "網": "网",
+        "曆": "历",
+        "曉": "晓",
+        "覺": "觉",
+        "讓": "让",
+        "與": "与",
+        "後": "后",
+        "幫": "帮",
+        "麼": "么",
+        "見": "见",
+        "電": "电",
+        "腦": "脑",
+        "輸": "输",
+        "入": "入",
+        "法": "法",
+    }
+)
+
 
 def _extract_result_text(payload: Any) -> str:
     if isinstance(payload, str):
@@ -71,6 +113,84 @@ def _faster_whisper_is_installed() -> bool:
     except ImportError:
         return False
     return True
+
+
+def _normalize_transcript_text(text: str) -> str:
+    normalized = text.translate(_TRADITIONAL_TO_SIMPLIFIED).strip()
+    normalized = normalized.replace("幫我", "帮我").replace("提醒一下", "提醒")
+    normalized = normalized.replace("行事历", "日历")
+    normalized = normalized.replace("曰程", "日程")
+    normalized = normalized.replace("几月几号", "几月几号")
+    normalized = normalized.replace("有一个会议", "有会议")
+    normalized = normalized.replace("有个会议", "有会议")
+    normalized = normalized.replace("有一个会", "有会")
+    return normalized
+
+
+def _normalize_wav_audio(audio: bytes, filename: str) -> bytes:
+    suffix = Path(filename or "voice.wav").suffix.lower()
+    if suffix != ".wav":
+        return audio
+
+    try:
+        with NamedTemporaryFile(suffix=".wav", delete=False) as input_file:
+            input_file.write(audio)
+            input_path = input_file.name
+
+        with wave.open(input_path, "rb") as reader:
+            channels = reader.getnchannels()
+            sample_width = reader.getsampwidth()
+            frame_rate = reader.getframerate()
+            frame_count = reader.getnframes()
+            frames = reader.readframes(frame_count)
+    except Exception:
+        if "input_path" in locals() and os.path.exists(input_path):
+            os.unlink(input_path)
+        return audio
+    finally:
+        if "input_path" in locals() and os.path.exists(input_path):
+            os.unlink(input_path)
+
+    if not frames or sample_width not in (1, 2, 4):
+        return audio
+
+    try:
+        rms = audioop.rms(frames, sample_width)
+        peak = audioop.max(frames, sample_width)
+    except Exception:
+        return audio
+
+    if rms <= 1 and peak <= 16:
+        raise ASRRequestError("录音几乎没有有效人声输入，请检查当前麦克风或远程桌面音频输入。")
+
+    if peak <= 0:
+        return audio
+
+    max_value = float((1 << (8 * sample_width - 1)) - 1)
+    target_peak = max_value * 0.75
+    gain = min(12.0, max(1.0, target_peak / float(peak)))
+    if gain <= 1.05:
+        return audio
+
+    try:
+        boosted = audioop.mul(frames, sample_width, gain)
+        with NamedTemporaryFile(suffix=".wav", delete=False) as output_file:
+            output_path = output_file.name
+        with wave.open(output_path, "wb") as writer:
+            writer.setnchannels(channels)
+            writer.setsampwidth(sample_width)
+            writer.setframerate(frame_rate)
+            writer.writeframes(boosted)
+        normalized = Path(output_path).read_bytes()
+    except Exception:
+        if "output_path" in locals() and os.path.exists(output_path):
+            os.unlink(output_path)
+        return audio
+    finally:
+        if "output_path" in locals() and os.path.exists(output_path):
+            os.unlink(output_path)
+
+    return normalized
 
 
 def _warmup_key(settings: Settings) -> tuple[str, str | None, str, str]:
@@ -170,6 +290,7 @@ class FasterWhisperService:
             raise ASRUnavailableError("未安装 faster-whisper，请先安装 voice 依赖。")
         if not audio:
             raise ASRRequestError("音频内容为空。")
+        audio = _normalize_wav_audio(audio, filename)
 
         model_name = self.settings.asr_model or "base"
         suffix = Path(filename or "voice.webm").suffix or ".webm"
@@ -214,7 +335,7 @@ class FasterWhisperService:
         with _WARMUP_LOCK:
             state.ready = True
             state.detail = "语音模型已就绪。"
-        return ASRTranscript(text=text, provider=self.provider_name())
+        return ASRTranscript(text=_normalize_transcript_text(text), provider=self.provider_name())
 
 
 class ThirdPartyASRService:
@@ -281,7 +402,7 @@ class ThirdPartyASRService:
         text = _extract_result_text(payload)
         if not text:
             raise ASRRequestError("第三方语音识别未返回文本。")
-        return ASRTranscript(text=text, provider=self.provider_name())
+        return ASRTranscript(text=_normalize_transcript_text(text), provider=self.provider_name())
 
 
 class ASRService:
