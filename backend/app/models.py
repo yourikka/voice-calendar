@@ -142,6 +142,12 @@ class VoiceCommandResponse(TextCommandResponse):
     reply_audio_url: str | None = None
 
 
+class VoiceTranscriptResponse(BaseModel):
+    transcript: str
+    asr_provider: str
+    locale: str = "zh-CN"
+
+
 class VoiceCapabilitiesResponse(BaseModel):
     server_asr_available: bool
     browser_fallback_recommended: bool = True

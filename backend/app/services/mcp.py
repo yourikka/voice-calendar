@@ -12,6 +12,7 @@ from app.models import (
 )
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
+from app.services.command import TextCommandService
 from app.services.news import NewsService
 from app.services.nlu import HybridCommandParser
 
@@ -23,10 +24,20 @@ class MCPToolService:
         self.news = NewsService(conn)
         self.briefing = DailyBriefingService(conn)
         self.parser = parser or HybridCommandParser()
+        self.commands = TextCommandService(
+            calendar=self.calendar,
+            news=self.news,
+            briefing=self.briefing,
+            parser=self.parser,
+        )
 
     def call_tool(self, tool_name: str, arguments: dict) -> MCPToolResponse:
         if tool_name == "calendar.parse_command":
             result = self.parser.parse(TextCommandRequest(**arguments))
+            return self._response(tool_name, result.model_dump(mode="json"))
+
+        if tool_name == "calendar.handle_command":
+            result = self.commands.handle(TextCommandRequest(**arguments))
             return self._response(tool_name, result.model_dump(mode="json"))
 
         if tool_name == "calendar.list_events":

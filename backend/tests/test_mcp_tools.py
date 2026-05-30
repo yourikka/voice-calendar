@@ -60,3 +60,21 @@ def test_mcp_news_and_briefing_tools(client: TestClient) -> None:
     assert briefing.status_code == 200
     assert "sections" in briefing.json()["result"]
 
+
+def test_mcp_handle_command_executes_calendar_action(client: TestClient) -> None:
+    response = client.post(
+        "/api/mcp/tools/calendar.handle_command",
+        json={
+            "arguments": {
+                "text": "明早八点提醒我带身份证",
+                "timezone": "Asia/Shanghai",
+                "locale": "zh-CN",
+                "now": "2026-05-29T10:00:00+08:00",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["intent"] == "create_reminder"
+    assert result["event"]["title"] == "带身份证"

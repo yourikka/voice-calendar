@@ -63,6 +63,27 @@ def build_mcp_server() -> FastMCP:
         return _call(ctx, "calendar.parse_command", _drop_none(arguments))
 
     @server.tool(
+        name="calendar.handle_command",
+        description="Handle a natural-language calendar, reminder, hot topic, or briefing command end to end.",
+    )
+    def handle_calendar_command(
+        text: str,
+        timezone: str = "Asia/Shanghai",
+        locale: str = "zh-CN",
+        session_id: str | None = None,
+        now: str | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        arguments = {
+            "text": text,
+            "timezone": timezone,
+            "locale": locale,
+            "session_id": session_id,
+            "now": now,
+        }
+        return _call(ctx, "calendar.handle_command", _drop_none(arguments))
+
+    @server.tool(
         name="calendar.list_events",
         description="List calendar events between start and end timestamps.",
     )

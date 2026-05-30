@@ -88,3 +88,20 @@ def test_voice_command_returns_503_without_asr_config(client) -> None:
         app.dependency_overrides.pop(get_asr_service, None)
 
     assert response.status_code == 503
+
+
+def test_voice_transcription_returns_transcript_only(client) -> None:
+    app.dependency_overrides[get_asr_service] = lambda: FakeASRService()
+    try:
+        response = client.post(
+            "/api/voice/transcriptions",
+            data={"locale": "zh-CN"},
+            files={"audio": ("voice.webm", b"fake-audio", "audio/webm")},
+        )
+    finally:
+        app.dependency_overrides.pop(get_asr_service, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["asr_provider"] == "fake-asr"
+    assert body["transcript"] == "明早八点提醒我带身份证"

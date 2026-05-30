@@ -32,6 +32,7 @@ from app.models import (
     UndoResponse,
     VoiceCapabilitiesResponse,
     VoiceCommandResponse,
+    VoiceTranscriptResponse,
 )
 from app.services.agent import ThirdPartyAgentParser
 from app.services.almanac import AlmanacService
@@ -225,6 +226,31 @@ async def handle_voice_command(
         command_id=f"cmd_{uuid4().hex}",
         asr_provider=transcript.provider,
         **response.model_dump(),
+    )
+
+
+@router.post("/voice/transcriptions", response_model=VoiceTranscriptResponse)
+async def transcribe_voice(
+    audio: UploadFile = File(...),
+    locale: str = Form("zh-CN"),
+    asr: ASRService = Depends(get_asr_service),
+) -> VoiceTranscriptResponse:
+    try:
+        transcript = asr.transcribe(
+            filename=audio.filename or "voice-input.webm",
+            audio=await audio.read(),
+            content_type=audio.content_type or "application/octet-stream",
+            locale=locale,
+        )
+    except ASRUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ASRRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return VoiceTranscriptResponse(
+        transcript=transcript.text,
+        asr_provider=transcript.provider,
+        locale=locale,
     )
 
 
