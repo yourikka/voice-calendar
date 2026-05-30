@@ -18,7 +18,7 @@ MCP_INSTRUCTIONS = (
 )
 
 
-def build_mcp_server() -> FastMCP:
+def build_mcp_server(streamable_http_path: str = "/mcp") -> FastMCP:
     settings = get_settings()
 
     @asynccontextmanager
@@ -33,7 +33,7 @@ def build_mcp_server() -> FastMCP:
         instructions=MCP_INSTRUCTIONS,
         host=settings.mcp_host,
         port=settings.mcp_port,
-        streamable_http_path="/mcp",
+        streamable_http_path=streamable_http_path,
         sse_path="/sse",
         message_path="/messages/",
         debug=False,

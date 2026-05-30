@@ -1,6 +1,5 @@
 from mcp.server.fastmcp import FastMCP
 
-from app.main import mcp_app
 from app.services.mcp_server import build_mcp_server
 
 
@@ -16,5 +15,9 @@ def test_build_mcp_server_exposes_named_tools() -> None:
     assert "briefing.get_daily_briefing" in tool_names
 
 
-def test_main_mounts_streamable_http_mcp_app() -> None:
-    assert mcp_app is not None
+def test_build_mcp_server_configures_streamable_http_defaults() -> None:
+    server = build_mcp_server("/mcp")
+
+    assert server.settings.host == "127.0.0.1"
+    assert server.settings.port == 8001
+    assert server.settings.streamable_http_path == "/mcp"

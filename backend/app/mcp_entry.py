@@ -8,5 +8,10 @@ def main() -> None:
     server.run(transport="stdio")
 
 
+def run_http() -> None:
+    server = build_mcp_server(streamable_http_path="/mcp")
+    server.run(transport="streamable-http")
+
+
 if __name__ == "__main__":
     main()
