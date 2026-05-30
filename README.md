@@ -46,10 +46,16 @@ Run the standalone MCP server over stdio:
 .venv/bin/python -m app.mcp_entry
 ```
 
-The FastAPI app also mounts the streamable HTTP MCP endpoint at:
+Run the standalone MCP HTTP server:
 
 ```text
-http://127.0.0.1:8000/mcp
+.venv/bin/python -m app.mcp_http_entry
+```
+
+Default MCP HTTP endpoint:
+
+```text
+http://127.0.0.1:8001/mcp
 ```
 
 Optional ASR configuration:
@@ -94,7 +100,7 @@ export VOICE_AGENT_MODEL="your-agent-model"
 - Voice capability probe: `GET /api/voice/capabilities`
 - Hot topics and daily briefing: `GET /api/news/today`, `GET /api/calendar/hot-topics`, `GET /api/briefings/daily`
 - MCP-style tool adapter: `POST /api/mcp/tools/{tool_name}`
-- Standard MCP server: stdio via `python -m app.mcp_entry`, streamable HTTP via `GET/POST /mcp`
+- Standard MCP server: stdio via `python -m app.mcp_entry`, streamable HTTP via standalone `python -m app.mcp_http_entry`
 - Desktop Web workspace: `GET /`
 
 ## Desktop Overlay
@@ -121,6 +127,7 @@ Optional backend override:
 
 ```bash
 export VOICE_CALENDAR_API_BASE="http://127.0.0.1:8000"
+export VOICE_CALENDAR_MCP_BASE="http://127.0.0.1:8001"
 ```
 
 ## Web Workspace

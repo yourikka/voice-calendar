@@ -34,14 +34,13 @@ async function sendCommand(text) {
 
   setBusy("执行中");
   try {
-    const response = await window.overlayAPI.callMcpTool("calendar.handle_command", {
+    const result = await window.overlayAPI.callMcpTool("calendar.handle_command", {
       text: trimmed,
       timezone: "Asia/Shanghai",
       locale: "zh-CN",
       session_id: sessionId,
       now: new Date().toISOString(),
     });
-    const result = response.result || {};
     sessionId = result.session_id || sessionId;
     intentText.textContent = result.intent || "unknown";
     resultText.textContent = JSON.stringify(result, null, 2);
