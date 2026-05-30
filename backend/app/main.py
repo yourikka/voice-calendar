@@ -11,11 +11,16 @@ from fastapi.staticfiles import StaticFiles
 from app.api import router
 from app.config import get_settings
 from app.db import initialize_database
+from app.services.asr import ASRService
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    initialize_database(get_settings())
+    settings = get_settings()
+    initialize_database(settings)
+    asr = ASRService(settings)
+    if settings.asr_preload_on_startup and asr.is_configured():
+        asr.warmup_async()
     yield
 
 

@@ -11,6 +11,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 ```
 
+Enable local voice recognition:
+
+```bash
+.venv/bin/python -m pip install -e '.[voice]'
+```
+
+This installs `faster-whisper`. The first real ASR request may still download model weights.
+If Hugging Face access is blocked, the backend defaults to `https://hf-mirror.com`.
+
 Run tests:
 
 ```bash
@@ -31,12 +40,46 @@ Open the Web workspace:
 http://127.0.0.1:8000/
 ```
 
+Optional ASR configuration:
+
+Local `faster-whisper` is now the default ASR provider. The default model set is:
+
+- `VOICE_ASR_PROVIDER=faster-whisper`
+- `VOICE_ASR_MODEL=base`
+- `VOICE_ASR_DEVICE=cpu`
+- `VOICE_ASR_COMPUTE_TYPE=int8`
+- `VOICE_ASR_PRELOAD_ON_STARTUP=false`
+
+If you want to force those values explicitly:
+
+```bash
+export VOICE_ASR_PROVIDER="faster-whisper"
+export VOICE_ASR_MODEL="base"
+export VOICE_ASR_DEVICE="cpu"
+export VOICE_ASR_COMPUTE_TYPE="int8"
+export VOICE_ASR_PRELOAD_ON_STARTUP="false"
+```
+
+Optional third-party ASR / agent services:
+
+```bash
+export VOICE_ASR_API_URL="https://your-asr-provider.example/v1/audio/transcriptions"
+export VOICE_ASR_API_KEY="your-asr-key"
+export VOICE_ASR_MODEL="your-asr-model"
+
+export VOICE_AGENT_API_URL="https://your-agent-provider.example/v1/chat/completions"
+export VOICE_AGENT_API_KEY="your-agent-key"
+export VOICE_AGENT_MODEL="your-agent-model"
+```
+
 ## Implemented MVP
 
 - Health check: `GET /api/health`
 - Event CRUD: `GET/POST/PATCH/DELETE /api/events`
 - Undo and confirmation: `POST /api/operations/undo`, `POST /api/operations/confirm`
 - Text command entrypoint: `POST /api/text/commands`
+- Voice command entrypoint: `POST /api/voice/commands`
+- Voice capability probe: `GET /api/voice/capabilities`
 - Hot topics and daily briefing: `GET /api/news/today`, `GET /api/calendar/hot-topics`, `GET /api/briefings/daily`
 - MCP-style tool adapter: `POST /api/mcp/tools/{tool_name}`
 - Desktop Web workspace: `GET /`
@@ -48,9 +91,19 @@ The desktop workspace follows a three-column layout:
 - Left: real-time hot topics
 - Center: FullCalendar-powered year/month/week/day/list calendar
 - Right: selected-day agenda
-- Floating voice control: Web Speech API input, with text input fallback
+- Floating voice control: backend audio upload first, browser speech recognition fallback
 
 The page calls the backend APIs directly, so start the API and open `http://127.0.0.1:8000/`.
+
+## Command Pipeline
+
+The backend now uses a three-layer voice pipeline:
+
+1. `ASR`: `/api/voice/commands` accepts audio and uses local `faster-whisper` by default, while still supporting configurable third-party ASR APIs.
+2. `NLU`: rule-based parsing produces `intent`, `slots`, `missing_fields`, and confidence.
+3. `Agent fallback`: when rules are uncertain or unsupported, a configurable third-party agent can return structured JSON for the same command.
+
+Web text commands, Web voice commands, and `calendar.parse_command` all reuse the same parsing flow.
 
 ## MCP Tool Examples
 

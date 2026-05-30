@@ -16,5 +16,11 @@ def test_calendar_meta_returns_holidays_and_solar_terms(client: TestClient) -> N
 
     assert items["2026-05-01"]["is_holiday"] is True
     assert items["2026-05-01"]["holiday_name"] == "劳动节"
+    assert items["2026-05-02"]["is_holiday"] is True
+    assert items["2026-05-02"]["holiday_name"] is None
+    assert items["2026-05-03"]["is_holiday"] is True
+    assert items["2026-05-03"]["holiday_name"] is None
     assert items["2026-05-05"]["solar_term"] == "立夏"
     assert items["2026-05-09"]["is_adjusted_workday"] is True
+    assert items["2026-05-10"]["is_holiday"] is False
+    assert items["2026-05-10"]["holiday_name"] is None

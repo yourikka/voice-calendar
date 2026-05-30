@@ -1,129 +1,87 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime, time, timedelta
+import threading
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from app.models import EventCreate, Reminder, TextCommandRequest, TextCommandResponse
+from app.models import EventCreate, EventUpdate, ParsedCommand, Reminder, TextCommandRequest, TextCommandResponse
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.news import NewsService
+from app.services.nlu import (
+    HybridCommandParser,
+    _format_time_value,
+    _parse_time_range,
+    _resolve_date,
+    normalize_text,
+    request_now,
+)
 
 
-WEEKDAY_MAP = {
-    "一": 0,
-    "二": 1,
-    "三": 2,
-    "四": 3,
-    "五": 4,
-    "六": 5,
-    "日": 6,
-    "天": 6,
-}
+@dataclass
+class PendingCommandState:
+    parsed: ParsedCommand
+    updated_at: datetime
 
-NUMBER_MAP = {
-    "零": 0,
-    "一": 1,
-    "二": 2,
-    "两": 2,
-    "三": 3,
-    "四": 4,
-    "五": 5,
-    "六": 6,
-    "七": 7,
-    "八": 8,
-    "九": 9,
-    "十": 10,
-    "十一": 11,
-    "十二": 12,
-    "十三": 13,
-    "十四": 14,
-    "十五": 15,
-    "十六": 16,
-    "十七": 17,
-    "十八": 18,
-    "十九": 19,
-    "二十": 20,
-}
+
+_PENDING_COMMANDS: dict[str, PendingCommandState] = {}
+_PENDING_LOCK = threading.Lock()
+_PENDING_TTL = timedelta(minutes=30)
 
 
 def _session_id(existing: str | None) -> str:
     return existing or f"ses_{uuid4().hex}"
 
 
-def _normalize(text: str) -> str:
-    return re.sub(r"\s+", "", text.strip())
+def _slot_datetime(date_text: str, time_text: str, timezone_name: str) -> datetime:
+    zone = ZoneInfo(timezone_name)
+    return datetime.combine(date.fromisoformat(date_text), time.fromisoformat(time_text), tzinfo=zone)
 
 
-def _now(request: TextCommandRequest) -> datetime:
-    zone = ZoneInfo(request.timezone)
-    if request.now:
-        return request.now.astimezone(zone)
-    return datetime.now(zone)
+def _build_reminders(offset_minutes: int | None, default_zero: bool = False) -> list[Reminder]:
+    if offset_minutes is None and not default_zero:
+        return []
+    return [Reminder(method="notification", offset_minutes=offset_minutes or 0)]
 
 
-def _parse_chinese_number(raw: str) -> int:
-    if raw.isdigit():
-        return int(raw)
-    if raw in NUMBER_MAP:
-        return NUMBER_MAP[raw]
-    if "十" in raw:
-        left, _, right = raw.partition("十")
-        tens = NUMBER_MAP.get(left, 1) if left else 1
-        ones = NUMBER_MAP.get(right, 0) if right else 0
-        return tens * 10 + ones
-    return NUMBER_MAP.get(raw, 0)
+def _get_pending_command(session_id: str) -> PendingCommandState | None:
+    with _PENDING_LOCK:
+        pending = _PENDING_COMMANDS.get(session_id)
+        if pending is None:
+            return None
+        if datetime.now(timezone.utc) - pending.updated_at > _PENDING_TTL:
+            _PENDING_COMMANDS.pop(session_id, None)
+            return None
+        return pending
 
 
-def _date_range(text: str, base: datetime) -> tuple[datetime, datetime]:
-    local_date = base.date()
-    if "后天" in text:
-        local_date += timedelta(days=2)
-    elif "明天" in text or "明日" in text or "明早" in text:
-        local_date += timedelta(days=1)
-    else:
-        weekday_match = re.search(r"(下周|下个周|这周|本周)?周([一二三四五六日天])", text)
-        if weekday_match:
-            target = WEEKDAY_MAP[weekday_match.group(2)]
-            delta = target - local_date.weekday()
-            if weekday_match.group(1) in {"下周", "下个周"}:
-                delta += 7
-            elif delta < 0:
-                delta += 7
-            local_date += timedelta(days=delta)
-    start = datetime.combine(local_date, time.min, tzinfo=base.tzinfo)
-    return start, start + timedelta(days=1)
+def _save_pending_command(session_id: str, parsed: ParsedCommand) -> None:
+    with _PENDING_LOCK:
+        _PENDING_COMMANDS[session_id] = PendingCommandState(
+            parsed=parsed,
+            updated_at=datetime.now(timezone.utc),
+        )
 
 
-def _parse_time(text: str) -> time | None:
-    match = re.search(r"([零一二两三四五六七八九十\d]{1,3})点(半|[零一二三四五六七八九十\d]{1,3}分?)?", text)
-    if not match:
-        if "早上" in text or "明早" in text:
-            return time(hour=8)
-        if "上午" in text:
-            return time(hour=10)
-        if "下午" in text:
-            return time(hour=15)
-        if "晚上" in text:
-            return time(hour=20)
-        return None
-
-    hour = _parse_chinese_number(match.group(1))
-    minute_raw = match.group(2)
-    minute = 0
-    if minute_raw == "半":
-        minute = 30
-    elif minute_raw:
-        minute = _parse_chinese_number(minute_raw.removesuffix("分"))
-    if ("下午" in text or "晚上" in text) and hour < 12:
-        hour += 12
-    return time(hour=hour, minute=minute)
+def _clear_pending_command(session_id: str) -> None:
+    with _PENDING_LOCK:
+        _PENDING_COMMANDS.pop(session_id, None)
 
 
-def _extract_title_after(text: str, marker: str) -> str:
-    _, _, title = text.partition(marker)
-    return title.strip("，。,. ") or "未命名事项"
+def _missing_prompt(parsed: ParsedCommand) -> str:
+    prompts = {
+        ("create_reminder", "time"): "什么时候提醒你？",
+        ("create_event", "start_time"): "这个事件几点开始？",
+        ("update_event", "new_time"): "你想改到几点？",
+        ("update_event", "title"): "你想修改哪个日程？",
+    }
+    for field in parsed.missing_fields:
+        prompt = prompts.get((parsed.intent, field))
+        if prompt:
+            return prompt
+    return "这条指令还缺少关键信息，请补充一下。"
 
 
 class TextCommandService:
@@ -132,213 +90,372 @@ class TextCommandService:
         calendar: CalendarService,
         news: NewsService | None = None,
         briefing: DailyBriefingService | None = None,
+        parser: HybridCommandParser | None = None,
     ) -> None:
         self.calendar = calendar
         self.news = news
         self.briefing = briefing
+        self.parser = parser or HybridCommandParser()
+
+    def parse(self, request: TextCommandRequest) -> ParsedCommand:
+        return self.parser.parse(request)
 
     def handle(self, request: TextCommandRequest) -> TextCommandResponse:
-        text = _normalize(request.text)
-        base = _now(request)
         session_id = _session_id(request.session_id)
+        parsed = self.parse(request)
+        pending = _get_pending_command(session_id)
+        if pending is not None:
+            parsed = self._merge_pending_command(request, parsed, pending.parsed)
+        return self._execute(request, parsed, session_id)
 
-        if "简报" in text:
+    def _response(
+        self,
+        request: TextCommandRequest,
+        parsed: ParsedCommand,
+        session_id: str,
+        *,
+        state: str,
+        reply_text: str,
+        requires_user_input: bool = False,
+        operation_id: str | None = None,
+        event=None,
+        candidates=None,
+    ) -> TextCommandResponse:
+        return TextCommandResponse(
+            session_id=session_id,
+            state=state,
+            transcript=request.text,
+            intent=parsed.intent,
+            reply_text=reply_text,
+            requires_user_input=requires_user_input,
+            operation_id=operation_id,
+            event=event,
+            candidates=candidates or [],
+            parser=parsed.parser,
+            confidence=parsed.confidence,
+            slots=parsed.slots,
+            missing_fields=parsed.missing_fields,
+        )
+
+    def _execute(
+        self,
+        request: TextCommandRequest,
+        parsed: ParsedCommand,
+        session_id: str,
+    ) -> TextCommandResponse:
+        if parsed.missing_fields:
+            _save_pending_command(session_id, parsed)
+            return self._response(
+                request,
+                parsed,
+                session_id,
+                state="collecting_slots",
+                reply_text=_missing_prompt(parsed),
+                requires_user_input=True,
+            )
+
+        if parsed.intent == "get_daily_briefing":
+            _clear_pending_command(session_id)
             if self.briefing:
-                date = _now(request).date().isoformat()
-                briefing = self.briefing.get_daily_briefing(date=date, timezone_name=request.timezone)
+                briefing = self.briefing.get_daily_briefing(
+                    date=parsed.slots["date"],
+                    timezone_name=request.timezone,
+                )
                 reply_text = briefing.spoken_summary
             else:
                 reply_text = "今日简报功能已进入简报服务处理流程。"
-            return TextCommandResponse(
-                session_id=session_id,
-                state="completed",
-                transcript=request.text,
-                intent="get_daily_briefing",
-                reply_text=reply_text,
-            )
-        if "热点" in text or "新闻" in text or "资讯" in text:
+            return self._response(request, parsed, session_id, state="completed", reply_text=reply_text)
+
+        if parsed.intent == "get_today_news":
+            _clear_pending_command(session_id)
             if self.news:
-                news = self.news.get_today_news(timezone_name=request.timezone, fresh=False)
+                news = self.news.get_today_news(
+                    timezone_name=request.timezone,
+                    category=parsed.slots.get("news_category"),
+                    limit=parsed.slots.get("limit", 5),
+                    fresh=False,
+                )
                 reply_text = news.spoken_summary
             else:
                 reply_text = "今日热点功能已进入资讯服务处理流程。"
-            return TextCommandResponse(
-                session_id=session_id,
-                state="completed",
-                transcript=request.text,
-                intent="get_today_news",
-                reply_text=reply_text,
-            )
-        if text.startswith("撤销") or "撤销刚才" in text:
+            return self._response(request, parsed, session_id, state="completed", reply_text=reply_text)
+
+        if parsed.intent == "undo_last_operation":
+            _clear_pending_command(session_id)
             result = self.calendar.undo_last_operation()
-            return TextCommandResponse(
-                session_id=session_id,
+            return self._response(
+                request,
+                parsed,
+                session_id,
                 state=result.state,
-                transcript=request.text,
-                intent="undo_last_operation",
                 reply_text=result.reply_text,
                 event=result.event,
             )
-        if text.startswith("取消") or text.startswith("删除"):
-            return self._handle_delete(request, text, base, session_id)
-        if "有什么安排" in text or "有哪些安排" in text or "有事吗" in text:
-            return self._handle_list(request, text, base, session_id)
-        if "提醒我" in text:
-            return self._handle_create_reminder(request, text, base, session_id)
-        if "开会" in text or "会议" in text or "面试" in text:
-            return self._handle_create_event(request, text, base, session_id)
 
-        return TextCommandResponse(
-            session_id=session_id,
+        if parsed.intent == "create_reminder":
+            _clear_pending_command(session_id)
+            start_at = _slot_datetime(parsed.slots["date"], parsed.slots["time"], request.timezone)
+            title = parsed.slots["title"]
+            created = self.calendar.create_event(
+                EventCreate(
+                    title=title,
+                    type="reminder",
+                    start_at=start_at,
+                    end_at=None,
+                    timezone=request.timezone,
+                    reminders=_build_reminders(None, default_zero=True),
+                    source="text",
+                )
+            )
+            return self._response(
+                request,
+                parsed,
+                session_id,
+                state="completed",
+                reply_text=f"已设置{start_at.strftime('%m月%d日%H:%M')}提醒你{title}。",
+                event=created.event,
+            )
+
+        if parsed.intent == "create_event":
+            _clear_pending_command(session_id)
+            start_at = _slot_datetime(parsed.slots["date"], parsed.slots["start_time"], request.timezone)
+            if parsed.slots.get("end_time"):
+                end_at = _slot_datetime(parsed.slots["date"], parsed.slots["end_time"], request.timezone)
+            else:
+                end_at = start_at + timedelta(hours=1)
+            title = parsed.slots["title"]
+            created = self.calendar.create_event(
+                EventCreate(
+                    title=title,
+                    type="event",
+                    start_at=start_at,
+                    end_at=end_at,
+                    timezone=request.timezone,
+                    participants=parsed.slots.get("participants") or [],
+                    reminders=_build_reminders(parsed.slots.get("reminder_offset_minutes")),
+                    source="text",
+                )
+            )
+            conflict_text = "，但存在时间冲突" if created.conflicts else ""
+            return self._response(
+                request,
+                parsed,
+                session_id,
+                state="completed",
+                reply_text=f"已创建{start_at.strftime('%m月%d日%H:%M')}的{title}{conflict_text}。",
+                event=created.event,
+            )
+
+        if parsed.intent == "list_events":
+            _clear_pending_command(session_id)
+            start = datetime.fromisoformat(parsed.slots["start"])
+            end = datetime.fromisoformat(parsed.slots["end"])
+            events = self.calendar.list_events(start, end)
+            if not events:
+                reply = "这段时间没有已安排的日程。"
+            else:
+                pieces = [f"{event.start_at.strftime('%H:%M')} {event.title}" for event in events[:3]]
+                reply = f"这段时间有 {len(events)} 个安排：" + "，".join(pieces)
+            return self._response(request, parsed, session_id, state="completed", reply_text=reply)
+
+        if parsed.intent == "delete_event":
+            _clear_pending_command(session_id)
+            start = datetime.fromisoformat(parsed.slots["start"])
+            end = datetime.fromisoformat(parsed.slots["end"])
+            keyword = parsed.slots.get("title", "")
+            candidates = self.calendar.find_events_by_title(keyword or "", start, end)
+            if not candidates:
+                return self._response(
+                    request,
+                    parsed,
+                    session_id,
+                    state="not_found",
+                    reply_text="没有找到匹配的日程。",
+                )
+            if len(candidates) > 1:
+                return self._response(
+                    request,
+                    parsed,
+                    session_id,
+                    state="selecting_candidate",
+                    reply_text=f"找到 {len(candidates)} 个匹配日程，请选择要取消哪一个。",
+                    requires_user_input=True,
+                    candidates=candidates,
+                )
+            operation = self.calendar.create_delete_draft(candidates[0].id)
+            return self._response(
+                request,
+                parsed,
+                session_id,
+                state="awaiting_confirmation",
+                reply_text=f"找到{candidates[0].title}，确认取消吗？",
+                requires_user_input=True,
+                operation_id=operation.id,
+                candidates=candidates,
+            )
+
+        if parsed.intent == "update_event":
+            _clear_pending_command(session_id)
+            start_at, explicit_end_at = self._resolve_update_times(parsed, request.timezone)
+            query_date = parsed.slots.get("target_date") or parsed.slots.get("new_date")
+            zone = ZoneInfo(request.timezone)
+            query_start = datetime.combine(date.fromisoformat(query_date), time.min, tzinfo=zone)
+            query_end = query_start + timedelta(days=1)
+            keyword = parsed.slots.get("title", "")
+            candidates = self.calendar.find_events_by_title(keyword or "", query_start, query_end)
+            if not candidates:
+                return self._response(
+                    request,
+                    parsed,
+                    session_id,
+                    state="not_found",
+                    reply_text="没有找到要修改的日程。",
+                )
+            if len(candidates) > 1:
+                return self._response(
+                    request,
+                    parsed,
+                    session_id,
+                    state="selecting_candidate",
+                    reply_text=f"找到 {len(candidates)} 个匹配日程，请选择要修改哪一个。",
+                    requires_user_input=True,
+                    candidates=candidates,
+                )
+            existing = self.calendar.get_event(candidates[0].id)
+            end_at = explicit_end_at
+            if end_at is None and existing.end_at:
+                end_at = start_at + (existing.end_at - existing.start_at)
+            updated = self.calendar.update_event(
+                existing.id,
+                EventUpdate(start_at=start_at, end_at=end_at),
+            )
+            conflict_text = "，但存在时间冲突" if updated.conflicts else ""
+            return self._response(
+                request,
+                parsed,
+                session_id,
+                state="completed",
+                reply_text=f"已将{updated.event.title}改到{start_at.strftime('%m月%d日%H:%M')}{conflict_text}。",
+                event=updated.event,
+            )
+
+        _clear_pending_command(session_id)
+        return self._response(
+            request,
+            parsed,
+            session_id,
             state="unsupported",
-            transcript=request.text,
-            intent="unknown",
             reply_text="暂时无法理解这条指令，请换一种说法。",
             requires_user_input=True,
         )
 
-    def _handle_create_reminder(
-        self,
-        request: TextCommandRequest,
-        text: str,
-        base: datetime,
-        session_id: str,
-    ) -> TextCommandResponse:
-        day_start, _ = _date_range(text, base)
-        parsed_time = _parse_time(text)
-        if parsed_time is None:
-            return TextCommandResponse(
-                session_id=session_id,
-                state="collecting_slots",
-                transcript=request.text,
-                intent="create_reminder",
-                reply_text="什么时候提醒你？",
-                requires_user_input=True,
-            )
-        start_at = datetime.combine(day_start.date(), parsed_time, tzinfo=day_start.tzinfo)
-        title = _extract_title_after(text, "提醒我")
-        created = self.calendar.create_event(
-            EventCreate(
-                title=title,
-                type="reminder",
-                start_at=start_at,
-                end_at=None,
-                timezone=request.timezone,
-                reminders=[Reminder(method="notification", offset_minutes=0)],
-                source="text",
-            )
-        )
-        return TextCommandResponse(
-            session_id=session_id,
-            state="completed",
-            transcript=request.text,
-            intent="create_reminder",
-            reply_text=f"已设置{start_at.strftime('%m月%d日%H:%M')}提醒你{title}。",
-            event=created.event,
-        )
+    @staticmethod
+    def _resolve_update_times(parsed: ParsedCommand, timezone_name: str) -> tuple[datetime, datetime | None]:
+        start_at = _slot_datetime(parsed.slots["new_date"], parsed.slots["new_start_time"], timezone_name)
+        end_time = parsed.slots.get("new_end_time")
+        if end_time:
+            return start_at, _slot_datetime(parsed.slots["new_date"], end_time, timezone_name)
+        return start_at, None
 
-    def _handle_create_event(
+    def _merge_pending_command(
         self,
         request: TextCommandRequest,
-        text: str,
-        base: datetime,
-        session_id: str,
-    ) -> TextCommandResponse:
-        day_start, _ = _date_range(text, base)
-        parsed_time = _parse_time(text)
-        if parsed_time is None:
-            return TextCommandResponse(
-                session_id=session_id,
-                state="collecting_slots",
-                transcript=request.text,
-                intent="create_event",
-                reply_text="这个事件几点开始？",
-                requires_user_input=True,
-            )
-        start_at = datetime.combine(day_start.date(), parsed_time, tzinfo=day_start.tzinfo)
-        end_at = start_at + timedelta(hours=1)
-        title = "会议" if "会议" in text or "开会" in text else "面试"
-        created = self.calendar.create_event(
-            EventCreate(
-                title=title,
-                type="event",
-                start_at=start_at,
-                end_at=end_at,
-                timezone=request.timezone,
-                source="text",
-            )
-        )
-        conflict_text = "，但存在时间冲突" if created.conflicts else ""
-        return TextCommandResponse(
-            session_id=session_id,
-            state="completed",
+        parsed: ParsedCommand,
+        pending: ParsedCommand,
+    ) -> ParsedCommand:
+        if parsed.intent not in {"unknown", pending.intent} and not parsed.missing_fields:
+            return parsed
+        if pending.intent == "create_event":
+            return self._merge_pending_create_event(request, parsed, pending)
+        if pending.intent == "create_reminder":
+            return self._merge_pending_create_reminder(request, parsed, pending)
+        if pending.intent == "update_event":
+            return self._merge_pending_update_event(request, parsed, pending)
+        return parsed
+
+    def _merge_pending_create_event(
+        self,
+        request: TextCommandRequest,
+        parsed: ParsedCommand,
+        pending: ParsedCommand,
+    ) -> ParsedCommand:
+        slots = dict(pending.slots)
+        slots.update({key: value for key, value in parsed.slots.items() if value not in (None, "", [], {})})
+        day = _resolve_date(request.text, request_now(request))
+        start_time, end_time = _parse_time_range(normalize_text(request.text))
+        if day is not None:
+            slots["date"] = day.isoformat()
+        if start_time is not None:
+            slots["start_time"] = _format_time_value(start_time)
+        if end_time is not None:
+            slots["end_time"] = _format_time_value(end_time)
+        missing_fields = []
+        if not slots.get("start_time"):
+            missing_fields.append("start_time")
+        return ParsedCommand(
             transcript=request.text,
+            normalized_text=normalize_text(request.text),
             intent="create_event",
-            reply_text=f"已创建{start_at.strftime('%m月%d日%H:%M')}的{title}{conflict_text}。",
-            event=created.event,
+            slots=slots,
+            missing_fields=missing_fields,
+            parser="rule+context",
+            confidence=0.9 if not missing_fields else 0.6,
         )
 
-    def _handle_list(
+    def _merge_pending_create_reminder(
         self,
         request: TextCommandRequest,
-        text: str,
-        base: datetime,
-        session_id: str,
-    ) -> TextCommandResponse:
-        start, end = _date_range(text, base)
-        events = self.calendar.list_events(start, end)
-        if not events:
-            reply = "这段时间没有已安排的日程。"
-        else:
-            pieces = [f"{event.start_at.strftime('%H:%M')} {event.title}" for event in events[:3]]
-            reply = f"这段时间有 {len(events)} 个安排：" + "，".join(pieces)
-        return TextCommandResponse(
-            session_id=session_id,
-            state="completed",
+        parsed: ParsedCommand,
+        pending: ParsedCommand,
+    ) -> ParsedCommand:
+        slots = dict(pending.slots)
+        slots.update({key: value for key, value in parsed.slots.items() if value not in (None, "", [], {})})
+        day = _resolve_date(request.text, request_now(request))
+        start_time, _ = _parse_time_range(normalize_text(request.text))
+        if day is not None:
+            slots["date"] = day.isoformat()
+        if start_time is not None:
+            slots["time"] = _format_time_value(start_time)
+        missing_fields = []
+        if not slots.get("time"):
+            missing_fields.append("time")
+        return ParsedCommand(
             transcript=request.text,
-            intent="list_events",
-            reply_text=reply,
+            normalized_text=normalize_text(request.text),
+            intent="create_reminder",
+            slots=slots,
+            missing_fields=missing_fields,
+            parser="rule+context",
+            confidence=0.9 if not missing_fields else 0.6,
         )
 
-    def _handle_delete(
+    def _merge_pending_update_event(
         self,
         request: TextCommandRequest,
-        text: str,
-        base: datetime,
-        session_id: str,
-    ) -> TextCommandResponse:
-        start, end = _date_range(text, base)
-        keyword = text.removeprefix("取消").removeprefix("删除")
-        for token in ("今天", "明天", "明日", "后天", "上午", "下午", "晚上", "的"):
-            keyword = keyword.replace(token, "")
-        keyword = keyword or "会议"
-        candidates = self.calendar.find_events_by_title(keyword, start, end)
-        if not candidates:
-            return TextCommandResponse(
-                session_id=session_id,
-                state="not_found",
-                transcript=request.text,
-                intent="delete_event",
-                reply_text="没有找到匹配的日程。",
-            )
-        if len(candidates) > 1:
-            return TextCommandResponse(
-                session_id=session_id,
-                state="selecting_candidate",
-                transcript=request.text,
-                intent="delete_event",
-                reply_text=f"找到 {len(candidates)} 个匹配日程，请选择要取消哪一个。",
-                requires_user_input=True,
-                candidates=candidates,
-            )
-        operation = self.calendar.create_delete_draft(candidates[0].id)
-        return TextCommandResponse(
-            session_id=session_id,
-            state="awaiting_confirmation",
+        parsed: ParsedCommand,
+        pending: ParsedCommand,
+    ) -> ParsedCommand:
+        slots = dict(pending.slots)
+        slots.update({key: value for key, value in parsed.slots.items() if value not in (None, "", [], {})})
+        day = _resolve_date(request.text, request_now(request))
+        start_time, end_time = _parse_time_range(normalize_text(request.text))
+        if day is not None:
+            slots["new_date"] = day.isoformat()
+        if start_time is not None:
+            slots["new_start_time"] = _format_time_value(start_time)
+        if end_time is not None:
+            slots["new_end_time"] = _format_time_value(end_time)
+        missing_fields = []
+        if not slots.get("title"):
+            missing_fields.append("title")
+        if not slots.get("new_start_time"):
+            missing_fields.append("new_time")
+        return ParsedCommand(
             transcript=request.text,
-            intent="delete_event",
-            reply_text=f"找到{candidates[0].title}，确认取消吗？",
-            requires_user_input=True,
-            operation_id=operation.id,
-            candidates=candidates,
+            normalized_text=normalize_text(request.text),
+            intent="update_event",
+            slots=slots,
+            missing_fields=missing_fields,
+            parser="rule+context",
+            confidence=0.88 if not missing_fields else 0.58,
         )

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Annotated
+from uuid import uuid4
 
 import sqlite3
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 
+from app.config import Settings, get_settings
 from app.db import get_connection
 from app.models import (
     CalendarMetaDayRead,
@@ -28,13 +30,18 @@ from app.models import (
     TextCommandRequest,
     TextCommandResponse,
     UndoResponse,
+    VoiceCapabilitiesResponse,
+    VoiceCommandResponse,
 )
+from app.services.agent import ThirdPartyAgentParser
 from app.services.almanac import AlmanacService
+from app.services.asr import ASRRequestError, ASRService, ASRUnavailableError
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.command import TextCommandService
 from app.services.mcp import MCPToolService
 from app.services.news import NewsService
+from app.services.nlu import HybridCommandParser
 
 
 router = APIRouter(prefix="/api")
@@ -56,6 +63,38 @@ def get_briefing_service(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
 ) -> DailyBriefingService:
     return DailyBriefingService(conn)
+
+
+def get_command_parser(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> HybridCommandParser:
+    agent_parser = ThirdPartyAgentParser(settings)
+    return HybridCommandParser(fallback_parser=agent_parser if agent_parser.is_configured() else None)
+
+
+def get_text_command_service(
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    parser: HybridCommandParser = Depends(get_command_parser),
+) -> TextCommandService:
+    return TextCommandService(
+        calendar=CalendarService(conn),
+        news=NewsService(conn),
+        briefing=DailyBriefingService(conn),
+        parser=parser,
+    )
+
+
+def get_asr_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ASRService:
+    return ASRService(settings)
+
+
+def get_mcp_tool_service(
+    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    parser: HybridCommandParser = Depends(get_command_parser),
+) -> MCPToolService:
+    return MCPToolService(conn, parser=parser)
 
 
 @router.get("/events", response_model=EventListResponse)
@@ -131,13 +170,62 @@ def confirm_operation(
 @router.post("/text/commands", response_model=TextCommandResponse)
 def handle_text_command(
     payload: TextCommandRequest,
-    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    service: TextCommandService = Depends(get_text_command_service),
 ) -> TextCommandResponse:
-    return TextCommandService(
-        calendar=CalendarService(conn),
-        news=NewsService(conn),
-        briefing=DailyBriefingService(conn),
-    ).handle(payload)
+    return service.handle(payload)
+
+
+@router.get("/voice/capabilities", response_model=VoiceCapabilitiesResponse)
+def get_voice_capabilities(
+    asr: ASRService = Depends(get_asr_service),
+) -> VoiceCapabilitiesResponse:
+    health = asr.health()
+    return VoiceCapabilitiesResponse(
+        server_asr_available=health.available,
+        provider=health.provider,
+        model=health.model,
+        ready=health.ready,
+        warming=health.warming,
+        detail=health.detail,
+    )
+
+
+@router.post("/voice/commands", response_model=VoiceCommandResponse)
+async def handle_voice_command(
+    audio: UploadFile = File(...),
+    timezone: str = Form("Asia/Shanghai"),
+    locale: str = Form("zh-CN"),
+    session_id: str | None = Form(None),
+    now: datetime | None = Form(None),
+    asr: ASRService = Depends(get_asr_service),
+    service: TextCommandService = Depends(get_text_command_service),
+) -> VoiceCommandResponse:
+    try:
+        transcript = asr.transcribe(
+            filename=audio.filename or "voice-input.webm",
+            audio=await audio.read(),
+            content_type=audio.content_type or "application/octet-stream",
+            locale=locale,
+        )
+    except ASRUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ASRRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    response = service.handle(
+        TextCommandRequest(
+            text=transcript.text,
+            timezone=timezone,
+            locale=locale,
+            session_id=session_id,
+            now=now,
+        )
+    )
+    return VoiceCommandResponse(
+        command_id=f"cmd_{uuid4().hex}",
+        asr_provider=transcript.provider,
+        **response.model_dump(),
+    )
 
 
 @router.get("/news/today", response_model=NewsTodayResponse)
@@ -207,9 +295,9 @@ def get_daily_briefing(
 def call_mcp_tool(
     tool_name: str,
     payload: MCPToolRequest,
-    conn: Annotated[sqlite3.Connection, Depends(get_connection)],
+    service: MCPToolService = Depends(get_mcp_tool_service),
 ) -> MCPToolResponse:
     try:
-        return MCPToolService(conn).call_tool(tool_name, payload.arguments)
+        return service.call_tool(tool_name, payload.arguments)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="MCP tool not found") from exc

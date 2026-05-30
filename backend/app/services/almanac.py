@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 import chinese_calendar as chinese_calendar_lib
+from lunardate import LunarDate
 
 
 HOLIDAY_NAME_MAP = {
@@ -40,10 +41,35 @@ class AlmanacService:
         solar_terms = chinese_calendar_lib.get_solar_terms(day, day)
         solar_term = solar_terms[0][1] if solar_terms else None
         is_adjusted_workday = chinese_calendar_lib.is_workday(day) and day.weekday() >= 5
+        is_statutory_holiday = is_holiday and holiday_key is not None
         return CalendarMetaDay(
             date=day.isoformat(),
-            is_holiday=is_holiday,
+            is_holiday=is_statutory_holiday,
             is_adjusted_workday=is_adjusted_workday,
-            holiday_name=HOLIDAY_NAME_MAP.get(holiday_key, holiday_key),
+            holiday_name=self._holiday_name_for_day(day, holiday_key, solar_term),
             solar_term=solar_term,
         )
+
+    def _holiday_name_for_day(self, day: date, holiday_key: str | None, solar_term: str | None) -> str | None:
+        if holiday_key is None or not self._is_primary_holiday_day(day, holiday_key, solar_term):
+            return None
+        return HOLIDAY_NAME_MAP.get(holiday_key, holiday_key)
+
+    def _is_primary_holiday_day(self, day: date, holiday_key: str, solar_term: str | None) -> bool:
+        if holiday_key == "New Year's Day":
+            return day.month == 1 and day.day == 1
+        if holiday_key == "Labour Day":
+            return day.month == 5 and day.day == 1
+        if holiday_key == "National Day":
+            return day.month == 10 and day.day == 1
+        if holiday_key == "Tomb-sweeping Day":
+            return solar_term == "清明"
+
+        lunar_day = LunarDate.fromSolarDate(day.year, day.month, day.day)
+        if holiday_key == "Spring Festival":
+            return lunar_day.month == 1 and lunar_day.day == 1
+        if holiday_key == "Dragon Boat Festival":
+            return lunar_day.month == 5 and lunar_day.day == 5
+        if holiday_key == "Mid-autumn Festival":
+            return lunar_day.month == 8 and lunar_day.day == 15
+        return False

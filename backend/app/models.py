@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -105,8 +105,19 @@ class Candidate(BaseModel):
 class TextCommandRequest(BaseModel):
     text: str = Field(min_length=1)
     timezone: str = "Asia/Shanghai"
+    locale: str = "zh-CN"
     session_id: str | None = None
     now: datetime | None = None
+
+
+class ParsedCommand(BaseModel):
+    transcript: str
+    normalized_text: str
+    intent: str
+    slots: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    parser: str = "rule"
+    confidence: float = 0.0
 
 
 class TextCommandResponse(BaseModel):
@@ -119,6 +130,26 @@ class TextCommandResponse(BaseModel):
     operation_id: str | None = None
     event: EventRead | None = None
     candidates: list[Candidate] = Field(default_factory=list)
+    parser: str | None = None
+    confidence: float | None = None
+    slots: dict[str, Any] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+
+
+class VoiceCommandResponse(TextCommandResponse):
+    command_id: str
+    asr_provider: str
+    reply_audio_url: str | None = None
+
+
+class VoiceCapabilitiesResponse(BaseModel):
+    server_asr_available: bool
+    browser_fallback_recommended: bool = True
+    provider: str | None = None
+    model: str | None = None
+    ready: bool = False
+    warming: bool = False
+    detail: str | None = None
 
 
 class NewsItemRead(BaseModel):
