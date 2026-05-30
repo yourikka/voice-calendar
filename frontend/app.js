@@ -2,14 +2,28 @@
   "use strict";
 
   const state = {
-    selectedDate: "2026-05-29",
+    selectedDate: new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date()),
     timezone: "Asia/Shanghai",
     events: [],
     dayMetaByDate: {},
     searchTerm: "",
+    sessionId: null,
     calendar: null,
     recognition: null,
     listening: false,
+    mediaRecorder: null,
+    mediaStream: null,
+    audioChunks: [],
+    recording: false,
+    recordingCancelled: false,
+    pendingVoiceRequest: null,
+    voiceMode: "none",
+    voiceCapabilities: null,
   };
 
   const hotList = document.querySelector("#hot-list");
@@ -138,9 +152,17 @@
         },
       },
       datesSet(info) {
+        const visibleStart = info.startStr.slice(0, 10);
+        const visibleEnd = info.endStr.slice(0, 10);
+        if (info.view.type === "timeGridDay") {
+          state.selectedDate = dateKeyFromViewDate(info.view.currentStart);
+        } else if (!isDateWithinRange(state.selectedDate, visibleStart, visibleEnd)) {
+          state.selectedDate = visibleStart;
+        }
         syncViewChrome(info.view.type, info.view.currentStart);
         updateActiveTab(info.view.type);
         loadViewData(info.startStr, info.endStr);
+        markSelectedDate();
       },
       dateClick(info) {
         if (info.view.type === "multiMonthYear") {
@@ -204,7 +226,7 @@
     const customFestival = getCustomFestival(dateKey);
     return {
       badge: remoteMeta.is_holiday ? "休" : (remoteMeta.is_adjusted_workday ? "班" : ""),
-      dot: Boolean(customFestival.dot),
+      dot: hasEventsOnDate(dateKey),
       isFestival: Boolean(remoteMeta.solar_term || customFestival.label || remoteMeta.holiday_name),
       label: remoteMeta.solar_term
         || customFestival.label
@@ -218,11 +240,15 @@
     const year = Number(yearText);
     const month = Number(monthText);
     const day = Number(dayText);
-    if (month === 5 && day === 4) return { label: "青年节", dot: true };
+    if (month === 5 && day === 4) return { label: "青年节" };
     if (month === 5 && dateKey === getNthWeekdayOfMonth(year, 5, 0, 2)) {
-      return { label: "母亲节", dot: false };
+      return { label: "母亲节" };
     }
-    return { label: "", dot: false };
+    return { label: "" };
+  }
+
+  function hasEventsOnDate(dateKey) {
+    return state.events.some((event) => event.start_at.slice(0, 10) === dateKey);
   }
 
   function getNthWeekdayOfMonth(year, month, weekday, nth) {
@@ -336,14 +362,19 @@
     return viewType === "timeGridWeek" ? 1 : 0;
   }
 
+  function dateKeyFromViewDate(date) {
+    return formatDateKey(date);
+  }
+
+  function isDateWithinRange(dateKey, start, end) {
+    return dateKey >= start.slice(0, 10) && dateKey < end.slice(0, 10);
+  }
+
   function changeCalendarView(viewType, dateText) {
     if (!state.calendar) return;
     state.calendar.setOption("firstDay", firstDayForView(viewType));
-    if (dateText) {
-      state.calendar.changeView(viewType, dateText);
-      return;
-    }
-    state.calendar.changeView(viewType);
+    const targetDate = dateText || state.selectedDate;
+    state.calendar.changeView(viewType, targetDate);
   }
 
   function toCalendarEvent(event) {
@@ -428,6 +459,7 @@
     const data = await response.json();
     state.events = data.items || [];
     refreshCalendarEvents();
+    decorateVisibleDayCells();
     markSelectedDate();
     renderAgenda();
   }
@@ -458,6 +490,7 @@
   function applySearch(term) {
     state.searchTerm = term;
     refreshCalendarEvents();
+    decorateVisibleDayCells();
     markSelectedDate();
     renderAgenda();
     assistantReply.textContent = term ? `已筛选包含“${term}”的日程。` : "已清除日程搜索。";
@@ -472,7 +505,11 @@
     calendarElement.querySelectorAll(".is-selected-date").forEach((cell) => {
       cell.classList.remove("is-selected-date");
     });
-    const selector = `.fc-day[data-date="${state.selectedDate}"]`;
+    const selector = [
+      `.fc-daygrid-day[data-date="${state.selectedDate}"]`,
+      `.fc-timegrid-col[data-date="${state.selectedDate}"]`,
+      `.fc-timegrid-axis-cushion[data-date="${state.selectedDate}"]`,
+    ].join(", ");
     calendarElement.querySelectorAll(selector).forEach((cell) => {
       cell.classList.add("is-selected-date");
     });
@@ -507,7 +544,9 @@
         body: JSON.stringify({ date: state.selectedDate, timezone: state.timezone }),
       });
     }
-    const response = await fetch(`/api/calendar/hot-topics?date=${state.selectedDate}&timezone=Asia/Shanghai&limit=5`);
+    const response = await fetch(
+      `/api/calendar/hot-topics?date=${state.selectedDate}&timezone=${encodeURIComponent(state.timezone)}&limit=5`,
+    );
     const data = await response.json();
     renderHotTopics(data.items || []);
   }
@@ -521,23 +560,32 @@
       body: JSON.stringify({
         text,
         timezone: state.timezone,
-        now: "2026-05-29T10:00:00+08:00",
+        session_id: state.sessionId,
+        now: new Date().toISOString(),
       }),
     });
     const data = await response.json();
+    if (data.session_id) state.sessionId = data.session_id;
     assistantReply.textContent = data.reply_text || "已处理。";
     commandInput.value = "";
     await Promise.all([loadCurrentEvents(), loadHotTopics(false)]);
   }
 
-  function setupVoice() {
+  function resetVoicePanel(defaultLabel) {
+    voicePanel.classList.remove("is-listening");
+    voiceCancel.hidden = true;
+    if (defaultLabel) voiceState.textContent = defaultLabel;
+  }
+
+  function stopMediaStream() {
+    if (!state.mediaStream) return;
+    state.mediaStream.getTracks().forEach((track) => track.stop());
+    state.mediaStream = null;
+  }
+
+  function setupBrowserRecognition() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      voiceState.textContent = "语音不可用";
-      assistantReply.textContent = "当前浏览器不支持语音识别，可以直接输入文字。";
-      voiceButton.addEventListener("click", () => commandInput.focus());
-      return;
-    }
+    if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
     state.recognition = recognition;
@@ -560,32 +608,302 @@
     });
     recognition.addEventListener("end", () => {
       state.listening = false;
-      voicePanel.classList.remove("is-listening");
-      voiceCancel.hidden = true;
-      if (voiceState.textContent === "正在聆听") voiceState.textContent = "点击说话";
+      if (!state.pendingVoiceRequest && !state.recording) resetVoicePanel("点击说话");
     });
     recognition.addEventListener("error", () => {
       state.listening = false;
-      voicePanel.classList.remove("is-listening");
-      voiceCancel.hidden = true;
-      voiceState.textContent = "识别失败";
+      resetVoicePanel("识别失败");
       assistantReply.textContent = "可以再点一次，或直接输入文字。";
     });
+  }
 
-    voiceButton.addEventListener("click", () => {
-      if (state.listening) {
-        recognition.abort();
+  async function loadVoiceCapabilities() {
+    try {
+      const response = await fetch("/api/voice/capabilities");
+      if (!response.ok) throw new Error("capabilities");
+      const data = await response.json();
+      state.voiceCapabilities = data;
+      return data;
+    } catch (_) {
+      const fallback = { server_asr_available: false, browser_fallback_recommended: true };
+      state.voiceCapabilities = fallback;
+      return fallback;
+    }
+  }
+
+  function describeVoiceCapabilities(capabilities) {
+    if (!capabilities?.server_asr_available) {
+      return "后端 ASR 不可用。";
+    }
+    if (capabilities.ready) {
+      return "语音模型已就绪。";
+    }
+    if (capabilities.warming) {
+      return "语音模型预热中，首次识别会稍慢。";
+    }
+    return capabilities.detail || "语音模型可用，首次点击录音会触发加载。";
+  }
+
+  function encodeWavBlob(audioBuffer) {
+    const channels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const source = [];
+    for (let channel = 0; channel < channels; channel += 1) {
+      source.push(audioBuffer.getChannelData(channel));
+    }
+    const frameCount = audioBuffer.length;
+    const pcm = new Int16Array(frameCount);
+    for (let index = 0; index < frameCount; index += 1) {
+      let sample = 0;
+      for (let channel = 0; channel < channels; channel += 1) {
+        sample += source[channel][index];
+      }
+      sample /= channels;
+      const clipped = Math.max(-1, Math.min(1, sample));
+      pcm[index] = clipped < 0 ? clipped * 0x8000 : clipped * 0x7fff;
+    }
+
+    const buffer = new ArrayBuffer(44 + (pcm.length * 2));
+    const view = new DataView(buffer);
+    const writeAscii = (offset, value) => {
+      for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+
+    writeAscii(0, "RIFF");
+    view.setUint32(4, 36 + (pcm.length * 2), true);
+    writeAscii(8, "WAVE");
+    writeAscii(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(36, "data");
+    view.setUint32(40, pcm.length * 2, true);
+    pcm.forEach((sample, index) => {
+      view.setInt16(44 + (index * 2), sample, true);
+    });
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  async function prepareVoiceUpload(blob, mimeType) {
+    const resolvedType = mimeType || blob.type || "application/octet-stream";
+    if (resolvedType === "audio/wav") {
+      return { blob, mimeType: "audio/wav", filename: "voice-input.wav" };
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return { blob, mimeType: resolvedType, filename: "voice-input.webm" };
+    }
+
+    const audioContext = new AudioContextClass();
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+      return {
+        blob: encodeWavBlob(decoded),
+        mimeType: "audio/wav",
+        filename: "voice-input.wav",
+      };
+    } catch (_) {
+      return { blob, mimeType: resolvedType, filename: "voice-input.webm" };
+    } finally {
+      await audioContext.close();
+    }
+  }
+
+  async function sendVoiceAudio(blob, mimeType) {
+    const controller = new AbortController();
+    const upload = await prepareVoiceUpload(blob, mimeType);
+    const formData = new FormData();
+    formData.append("audio", new File([upload.blob], upload.filename, { type: upload.mimeType }));
+    formData.append("timezone", state.timezone);
+    formData.append("locale", "zh-CN");
+    if (state.sessionId) formData.append("session_id", state.sessionId);
+    formData.append("now", new Date().toISOString());
+    state.pendingVoiceRequest = controller;
+    voicePanel.classList.add("is-listening");
+    voiceCancel.hidden = false;
+    voiceState.textContent = "识别中";
+    assistantReply.textContent = "正在转写语音...";
+
+    try {
+      const response = await fetch("/api/voice/commands", {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "语音处理失败。");
+      if (data.session_id) state.sessionId = data.session_id;
+      state.voiceCapabilities = {
+        ...(state.voiceCapabilities || {}),
+        server_asr_available: true,
+        ready: true,
+        warming: false,
+        detail: "语音模型已就绪。",
+      };
+      voiceState.textContent = "已识别";
+      assistantReply.textContent = data.state === "unsupported" && data.transcript
+        ? `暂时无法理解。识别到的内容是：${data.transcript}`
+        : (data.reply_text || data.transcript || "已处理。");
+      commandInput.value = data.transcript || "";
+      await Promise.all([loadCurrentEvents(), loadHotTopics(false)]);
+    } catch (error) {
+      if (controller.signal.aborted) {
         voiceState.textContent = "已取消";
         assistantReply.textContent = "语音输入已取消。";
-        return;
+      } else {
+        resetVoicePanel(state.voiceMode === "server" ? "点击录音" : "点击说话");
+        assistantReply.textContent = error.message || "语音处理失败。";
       }
-      recognition.start();
+    } finally {
+      state.pendingVoiceRequest = null;
+      if (voiceState.textContent !== "已取消") {
+        resetVoicePanel(state.voiceMode === "server" ? "点击录音" : "点击说话");
+      } else {
+        voicePanel.classList.remove("is-listening");
+        voiceCancel.hidden = true;
+      }
+    }
+  }
+
+  async function startServerRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      throw new Error("当前浏览器不支持录音上传。");
+    }
+    state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.audioChunks = [];
+    state.recordingCancelled = false;
+    state.recording = true;
+    state.mediaRecorder = new MediaRecorder(state.mediaStream);
+    state.mediaRecorder.addEventListener("dataavailable", (event) => {
+      if (event.data && event.data.size) state.audioChunks.push(event.data);
     });
-    voiceCancel.addEventListener("click", () => {
-      recognition.abort();
+    state.mediaRecorder.addEventListener("stop", async () => {
+      const mimeType = state.mediaRecorder?.mimeType || "audio/webm";
+      const chunks = state.audioChunks.slice();
+      const cancelled = state.recordingCancelled;
+      state.audioChunks = [];
+      state.mediaRecorder = null;
+      state.recording = false;
+      stopMediaStream();
+      if (cancelled || !chunks.length) return;
+      await sendVoiceAudio(new Blob(chunks, { type: mimeType }), mimeType);
+    });
+    state.mediaRecorder.start();
+    voicePanel.classList.add("is-listening");
+    voiceCancel.hidden = false;
+    voiceState.textContent = "录音中";
+    assistantReply.textContent = "再次点击语音球完成录音，或点取消丢弃。";
+  }
+
+  function finishServerRecording() {
+    if (!state.mediaRecorder || state.mediaRecorder.state === "inactive") return;
+    voiceState.textContent = "上传中";
+    assistantReply.textContent = "正在上传语音...";
+    state.mediaRecorder.stop();
+  }
+
+  function cancelCurrentVoice() {
+    if (state.pendingVoiceRequest) {
+      state.pendingVoiceRequest.abort();
+      return;
+    }
+    if (state.recording) {
+      state.recordingCancelled = true;
+      if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+        state.mediaRecorder.stop();
+      }
+      stopMediaStream();
+      resetVoicePanel(state.voiceMode === "server" ? "点击录音" : "点击说话");
       voiceState.textContent = "已取消";
       assistantReply.textContent = "语音输入已取消。";
-    });
+      return;
+    }
+    if (state.listening && state.recognition) {
+      state.recognition.abort();
+      voiceState.textContent = "已取消";
+      assistantReply.textContent = "语音输入已取消。";
+    }
+  }
+
+  async function handleVoiceButtonClick() {
+    if (state.pendingVoiceRequest) {
+      cancelCurrentVoice();
+      return;
+    }
+
+    if (state.voiceMode === "server") {
+      if (state.recording) {
+        finishServerRecording();
+        return;
+      }
+      try {
+        await startServerRecording();
+      } catch (error) {
+        if (state.recognition) {
+          state.voiceMode = "browser";
+          voiceState.textContent = "点击说话";
+          assistantReply.textContent = "后端录音不可用，已切回浏览器语音识别。";
+          state.recognition.start();
+          return;
+        }
+        voiceState.textContent = "语音不可用";
+        assistantReply.textContent = error.message || "当前环境无法使用语音。";
+      }
+      return;
+    }
+
+    if (state.voiceMode === "browser" && state.recognition) {
+      if (state.listening) {
+        cancelCurrentVoice();
+        return;
+      }
+      state.recognition.start();
+      return;
+    }
+
+    commandInput.focus();
+  }
+
+  async function setupVoice() {
+    setupBrowserRecognition();
+    const capabilities = await loadVoiceCapabilities();
+    const canRecord = Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+
+    if (capabilities.server_asr_available && canRecord) {
+      state.voiceMode = "server";
+      voiceState.textContent = capabilities.ready ? "点击录音" : (capabilities.warming ? "语音预热中" : "点击录音");
+      assistantReply.textContent = describeVoiceCapabilities(capabilities);
+      if (capabilities.warming && !capabilities.ready) {
+        window.setTimeout(() => {
+          loadVoiceCapabilities().then((latest) => {
+            if (state.voiceMode === "server") {
+              voiceState.textContent = latest.ready ? "点击录音" : "语音预热中";
+              assistantReply.textContent = describeVoiceCapabilities(latest);
+            }
+          });
+        }, 4000);
+      }
+      return;
+    }
+    if (state.recognition) {
+      state.voiceMode = "browser";
+      voiceState.textContent = "点击说话";
+      assistantReply.textContent = capabilities.server_asr_available
+        ? `${describeVoiceCapabilities(capabilities)} 当前浏览器不支持录音上传，已切换到浏览器语音识别。`
+        : "后端 ASR 未配置，当前使用浏览器语音识别。";
+      return;
+    }
+    state.voiceMode = "none";
+    voiceState.textContent = "语音不可用";
+    assistantReply.textContent = "当前环境不支持语音输入，可以直接输入文字。";
   }
 
   function formatTime(value) {
@@ -660,6 +978,12 @@
   commandInput.addEventListener("input", () => {
     if (!commandInput.value.trim() && state.searchTerm) applySearch("");
   });
+  voiceButton.addEventListener("click", () => {
+    handleVoiceButtonClick();
+  });
+  voiceCancel.addEventListener("click", () => {
+    cancelCurrentVoice();
+  });
   hotRefresh.addEventListener("click", () => loadHotTopics(true));
   agendaList.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-event-id]");
@@ -681,9 +1005,13 @@
     gotoMonth(Number(yearInput.value), Number(monthInput.value));
   });
 
-  setupVoice();
-  initCalendar();
-  loadHotTopics(false).catch(() => {
+  async function bootstrap() {
+    initCalendar();
+    await setupVoice();
+    await loadHotTopics(false);
+  }
+
+  bootstrap().catch(() => {
     assistantReply.textContent = "后端暂不可用，请确认 API 已启动。";
   });
 })();

@@ -271,7 +271,7 @@ button {
 
 .calendar-panel {
   padding: 26px 0 22px;
-  min-height: 720px;
+  min-height: 620px;
   overflow: hidden;
 }
 
@@ -394,7 +394,7 @@ button {
 }
 
 .calendar-widget {
-  min-height: 570px;
+  min-height: 472px;
   padding: 0 28px 8px;
 }
 
@@ -434,6 +434,9 @@ button {
 }
 
 .calendar-widget .fc-daygrid-day-frame {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   min-height: 104px;
   padding: 8px;
 }
@@ -444,8 +447,9 @@ button {
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-frame {
-  min-height: 156px;
-  padding: 16px 14px 18px;
+  min-height: 112px;
+  aspect-ratio: 1 / 1;
+  padding: 12px 12px 14px;
 }
 
 .calendar-widget .fc-daygrid-day-number {
@@ -465,7 +469,7 @@ button {
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-number {
   margin: 0;
-  font-size: clamp(30px, 3vw, 46px);
+  font-size: clamp(28px, 2.6vw, 42px);
   font-weight: 800;
   color: #18191c;
 }
@@ -501,8 +505,8 @@ button {
 .calendar-widget .fc-dayGridMonth-view .is-selected-date .fc-daygrid-day-frame::before {
   content: "";
   position: absolute;
-  inset: 6px 10px 10px;
-  border-radius: 24px;
+  inset: 1px;
+  border-radius: 18px;
   background: #fff;
   box-shadow: 0 22px 42px rgb(20 23 28 / 10%);
 }
@@ -521,13 +525,34 @@ button {
 }
 
 .calendar-widget .fc-dayGridMonth-view .is-selected-date .fc-daygrid-day-frame::after {
-  bottom: 18px;
-  width: 40px;
-  height: 8px;
+  bottom: 8px;
+  width: 34px;
+  height: 7px;
 }
 
 .calendar-widget .is-selected-date .fc-daygrid-day-number {
   color: #050505;
+}
+
+.calendar-widget .fc-timegrid-col.is-selected-date {
+  background: rgb(255 255 255 / 86%);
+  box-shadow: inset 0 0 0 2px rgb(255 64 80 / 18%);
+}
+
+.calendar-widget .fc-timegrid-col.is-selected-date .fc-timegrid-col-frame {
+  position: relative;
+}
+
+.calendar-widget .fc-timegrid-col.is-selected-date .fc-timegrid-col-frame::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  width: 40px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--accent);
+  transform: translateX(-50%);
 }
 
 .calendar-widget .is-selected-date .fc-daygrid-day-top,
@@ -538,39 +563,49 @@ button {
 
 .month-cell-status {
   position: absolute;
-  top: 20px;
-  right: 16px;
-  z-index: 1;
-  color: var(--accent);
-  font-size: 14px;
+  top: 10px;
+  right: 8px;
+  z-index: 2;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 96%);
+  background: rgb(255 64 80 / 15%);
+  color: #ff4050;
+  font-size: 11px;
   font-weight: 800;
   line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px rgb(255 64 80 / 10%);
+}
+
+.month-cell-status.is-rest {
+  background: rgb(255 64 80 / 16%);
 }
 
 .month-cell-status.is-work {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: rgb(255 64 80 / 18%);
-  font-size: 12px;
+  background: rgb(25 126 255 / 16%);
+  color: #1a6ce6;
 }
 
 .month-cell-meta {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 42px;
+  left: 12px;
+  right: 12px;
+  bottom: 20px;
   z-index: 1;
   display: grid;
   justify-items: start;
-  gap: 10px;
+  gap: 6px;
 }
 
 .month-cell-text {
   color: #b6b8bd;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -599,15 +634,7 @@ button {
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-events {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 34px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: center;
-  min-height: 10px;
+  display: none;
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-bottom {
@@ -617,7 +644,7 @@ button {
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-event-harness {
   position: relative !important;
   inset: auto !important;
-  margin: 0 3px;
+  margin: 0;
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-event-harness-abs {
@@ -625,8 +652,8 @@ button {
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-event {
-  width: 8px;
-  min-height: 8px;
+  width: 7px;
+  min-height: 7px;
   border: 0;
   border-radius: 50%;
   background: #d5d9df;
@@ -639,8 +666,8 @@ button {
 }
 
 .calendar-widget .fc-dayGridMonth-view .fc-daygrid-dot-event {
-  width: 8px;
-  min-height: 8px;
+  width: 7px;
+  min-height: 7px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -1040,16 +1067,16 @@ button {
   }
 
   .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-frame {
-    min-height: 120px;
-    padding: 12px 10px 14px;
+    min-height: 96px;
+    padding: 10px 9px 10px;
   }
 
   .calendar-widget .fc-dayGridMonth-view .fc-daygrid-day-number {
-    font-size: 28px;
+    font-size: 24px;
   }
 
   .month-cell-text {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .voice-float {
