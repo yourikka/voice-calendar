@@ -36,6 +36,19 @@ let overlayState = {
   displayId: null,
 };
 
+function getDebugLogPath() {
+  return path.join(app.getPath("userData"), "overlay-debug.log");
+}
+
+function appendDebugLog(entry) {
+  try {
+    fs.mkdirSync(path.dirname(getDebugLogPath()), { recursive: true });
+    fs.appendFileSync(getDebugLogPath(), `${JSON.stringify(entry)}\n`);
+  } catch (_) {
+    // Ignore debug logging failures.
+  }
+}
+
 async function getMcpClient() {
   if (!overlayMcpClient) {
     const module = await import(path.join(__dirname, "mcpClient.mjs"));
@@ -154,6 +167,32 @@ function createOverlayWindow() {
   });
 
   overlayWindow.loadFile(path.join(__dirname, "src/index.html"));
+  overlayWindow.webContents.on("did-finish-load", () => {
+    appendDebugLog({ event: "webContents:did-finish-load" });
+  });
+  overlayWindow.webContents.on("dom-ready", () => {
+    appendDebugLog({ event: "webContents:dom-ready" });
+  });
+  overlayWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    appendDebugLog({
+      event: "webContents:console-message",
+      level,
+      message,
+      line,
+      sourceId,
+    });
+  });
+  overlayWindow.webContents.on("render-process-gone", (_event, details) => {
+    appendDebugLog({ event: "webContents:render-process-gone", details });
+  });
+  overlayWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    appendDebugLog({
+      event: "webContents:did-fail-load",
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.on("closed", () => {
@@ -188,11 +227,22 @@ function createCalendarWindow(url) {
   return calendarWindow;
 }
 
-function resizeOverlayWindow(mode) {
+function resizeOverlayWindow(mode, contentHeight, contentWidth) {
   if (!overlayWindow) {
     return;
   }
-  const target = getTargetSize(mode);
+  const target = { ...getTargetSize(mode) };
+  if (mode === "expanded" && Number.isFinite(contentHeight)) {
+    target.height = Math.max(168, Math.min(Math.round(contentHeight), EXPANDED_SIZE.height));
+  }
+  if (mode !== "expanded") {
+    if (Number.isFinite(contentWidth)) {
+      target.width = Math.max(108, Math.min(Math.round(contentWidth), COMPACT_SIZE.width));
+    }
+    if (Number.isFinite(contentHeight)) {
+      target.height = Math.max(52, Math.min(Math.round(contentHeight), COMPACT_SIZE.height));
+    }
+  }
   const currentBounds = overlayWindow.getBounds();
   const display = screen.getDisplayMatching(currentBounds);
   const nextBounds = clampBounds(
@@ -232,15 +282,19 @@ app.on("before-quit", async () => {
 });
 
 ipcMain.handle("overlay:config", async () => {
+  appendDebugLog({ event: "overlay:config" });
   return {
     backendBaseUrl: BACKEND_BASE_URL,
     mcpBaseUrl: MCP_BASE_URL,
     calendarUrl: `${BACKEND_BASE_URL}/`,
+    dragMode: "bridge",
+    nativeAudioCapture: false,
     toolOptions: DEFAULT_TOOL_OPTIONS,
   };
 });
 
 ipcMain.handle("overlay:open-calendar", async () => {
+  appendDebugLog({ event: "overlay:open-calendar" });
   const url = `${BACKEND_BASE_URL}/`;
   try {
     createCalendarWindow(url);
@@ -258,16 +312,19 @@ ipcMain.handle("overlay:open-calendar", async () => {
 });
 
 ipcMain.handle("overlay:call-mcp-tool", async (_event, toolName, argumentsPayload) => {
+  appendDebugLog({ event: "overlay:call-mcp-tool", toolName });
   const client = await getMcpClient();
   return client.callTool(toolName, argumentsPayload);
 });
 
-ipcMain.handle("overlay:set-mode", async (_event, mode) => {
-  resizeOverlayWindow(mode);
+ipcMain.handle("overlay:set-mode", async (_event, mode, contentHeight, contentWidth) => {
+  appendDebugLog({ event: "overlay:set-mode", mode, contentHeight, contentWidth });
+  resizeOverlayWindow(mode, contentHeight, contentWidth);
   return { ok: true };
 });
 
 ipcMain.handle("overlay:drag-start", async (_event, payload) => {
+  appendDebugLog({ event: "overlay:drag-start", payload });
   if (!overlayWindow) {
     return { ok: false };
   }
@@ -280,6 +337,7 @@ ipcMain.handle("overlay:drag-start", async (_event, payload) => {
 });
 
 ipcMain.handle("overlay:drag-move", async (_event, payload) => {
+  appendDebugLog({ event: "overlay:drag-move", payload });
   if (!overlayWindow || !dragState) {
     return { ok: false };
   }
@@ -296,6 +354,7 @@ ipcMain.handle("overlay:drag-move", async (_event, payload) => {
 });
 
 ipcMain.handle("overlay:drag-end", async () => {
+  appendDebugLog({ event: "overlay:drag-end" });
   if (!overlayWindow) {
     return { ok: false };
   }
@@ -304,4 +363,8 @@ ipcMain.handle("overlay:drag-end", async () => {
   overlayWindow.setBounds(clamped, false);
   persistWindowPlacement(clamped);
   return { ok: true, bounds: clamped };
+});
+
+ipcMain.on("overlay:debug-log", (_event, payload) => {
+  appendDebugLog(payload);
 });

@@ -22,8 +22,10 @@ const voiceProvider = document.querySelector("#voice-provider");
 const toolChecklist = document.querySelector("#tool-checklist");
 const transcriptText = document.querySelector("#transcript-text");
 const voiceOrbLabel = document.querySelector("#voice-orb-label");
+const compactDragHandle = document.querySelector("#compact-drag-handle");
+const panelDragHandle = document.querySelector("#panel-drag-handle");
 
-let overlayAPI = null;
+let overlayBridge = null;
 let isExpanded = false;
 let mediaRecorder = null;
 let mediaStream = null;
@@ -40,6 +42,17 @@ let dragMode = "bridge";
 let nativeAudioCapture = false;
 let nativeRecording = false;
 let toolPanelExpanded = false;
+let dragging = false;
+
+function debugLog(event, payload = {}) {
+  try {
+    if (window.overlayAPI?.debugLog) {
+      window.overlayAPI.debugLog(event, payload);
+    }
+  } catch (_) {
+    // Ignore debug logging failures in renderer.
+  }
+}
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -86,18 +99,23 @@ async function resolveOverlayAPI() {
 }
 
 async function bootstrap() {
-  overlayAPI = await resolveOverlayAPI();
-  const config = await overlayAPI.getConfig();
+  debugLog("bootstrap:start");
+  overlayBridge = await resolveOverlayAPI();
+  debugLog("bootstrap:resolved-api", { hasOverlayApi: Boolean(overlayBridge) });
+  const config = await overlayBridge.getConfig();
+  debugLog("bootstrap:config", config);
   backendText.textContent = (config.backendBaseUrl || "").replace(/\/+$/, "");
   dragMode = config.dragMode || "bridge";
   nativeAudioCapture = Boolean(config.nativeAudioCapture);
   toolOptions = Array.isArray(config.toolOptions) ? config.toolOptions : [];
   renderToolChecklist();
+  installBridgeDrag(compactDragHandle);
+  installBridgeDrag(panelDragHandle);
   setToolPanelExpanded(false);
   await setMode("compact");
   window.setInterval(async () => {
     try {
-      const pending = await overlayAPI.getPendingNotification();
+      const pending = await overlayBridge.getPendingNotification();
       if (pending?.title || pending?.body) {
         stateText.textContent = "提醒";
         replyText.textContent = pending.body || pending.title || "到点了";
@@ -118,7 +136,7 @@ async function setMode(mode) {
   assistantPanel.hidden = !isExpanded;
   const contentHeight = isExpanded ? measureExpandedContentHeight() : measureCompactContentHeight();
   const contentWidth = isExpanded ? undefined : measureCompactContentWidth();
-  await overlayAPI.setMode(mode, contentHeight, contentWidth);
+  await overlayBridge.setMode(mode, contentHeight, contentWidth);
   if (isExpanded) {
     queueExpandedWindowSync();
   } else {
@@ -134,6 +152,50 @@ function setBusy(label) {
 function setIdle() {
   statusText.textContent = "待命";
 }
+
+function installBridgeDrag(element) {
+  if (!element || dragMode !== "bridge") {
+    return;
+  }
+  element.addEventListener("pointerdown", async (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    debugLog("drag:pointerdown", { id: element.id || null, screenX: event.screenX, screenY: event.screenY });
+    dragging = true;
+    try {
+      await overlayBridge.startDrag(event.screenX, event.screenY);
+    } catch (_) {
+      dragging = false;
+    }
+  });
+}
+
+window.addEventListener("pointermove", (event) => {
+  if (!dragging || dragMode !== "bridge") {
+    return;
+  }
+  debugLog("drag:pointermove", { screenX: event.screenX, screenY: event.screenY });
+  void overlayBridge.moveDrag(event.screenX, event.screenY);
+});
+
+window.addEventListener("pointerup", () => {
+  if (!dragging || dragMode !== "bridge") {
+    return;
+  }
+  dragging = false;
+  debugLog("drag:pointerup");
+  void overlayBridge.endDrag();
+});
+
+window.addEventListener("pointercancel", () => {
+  if (!dragging || dragMode !== "bridge") {
+    return;
+  }
+  dragging = false;
+  debugLog("drag:pointercancel");
+  void overlayBridge.endDrag();
+});
 
 function setToolPanelExpanded(expanded) {
   toolPanelExpanded = expanded;
@@ -171,7 +233,7 @@ async function syncExpandedWindowSize() {
   if (!isExpanded) {
     return;
   }
-  await overlayAPI.setMode("expanded", measureExpandedContentHeight());
+  await overlayBridge.setMode("expanded", measureExpandedContentHeight());
 }
 
 function queueCompactWindowSync() {
@@ -187,7 +249,7 @@ async function syncCompactWindowSize() {
   if (isExpanded) {
     return;
   }
-  await overlayAPI.setMode("compact", measureCompactContentHeight(), measureCompactContentWidth());
+  await overlayBridge.setMode("compact", measureCompactContentHeight(), measureCompactContentWidth());
 }
 
 function renderToolChecklist() {
@@ -389,7 +451,7 @@ async function executeSelectedTools(audioBase64, contentType) {
   const toolResults = [];
 
   if (hasVoiceAgent) {
-    const result = await overlayAPI.callMcpTool("voice.handle_command", buildVoicePayload(audioBase64, contentType));
+    const result = await overlayBridge.callMcpTool("voice.handle_command", buildVoicePayload(audioBase64, contentType));
     transcript = result.transcript || "";
     provider = result.asr_provider || "voice.handle_command";
     toolResults.push({ tool: "voice.handle_command", result });
@@ -397,7 +459,7 @@ async function executeSelectedTools(audioBase64, contentType) {
 
   const extraTools = selected.filter((toolName) => toolName !== "voice.handle_command");
   if (extraTools.length > 0 && !transcript) {
-    const transcriptResult = await overlayAPI.callMcpTool("voice.transcribe_audio", {
+    const transcriptResult = await overlayBridge.callMcpTool("voice.transcribe_audio", {
       audio_base64: audioBase64,
       filename: "voice-input.webm",
       content_type: contentType,
@@ -415,12 +477,12 @@ async function executeSelectedTools(audioBase64, contentType) {
     if (!shouldUseTool(toolName, transcript)) {
       continue;
     }
-    const result = await overlayAPI.callMcpTool(toolName, buildTextPayload(toolName, transcript));
+    const result = await overlayBridge.callMcpTool(toolName, buildTextPayload(toolName, transcript));
     toolResults.push({ tool: toolName, result });
   }
 
   if (toolResults.length === 0) {
-    const result = await overlayAPI.callMcpTool("calendar.handle_command", buildTextPayload("calendar.handle_command", transcript));
+    const result = await overlayBridge.callMcpTool("calendar.handle_command", buildTextPayload("calendar.handle_command", transcript));
     toolResults.push({ tool: "calendar.handle_command", result });
   }
 
@@ -496,10 +558,10 @@ async function stopRecording() {
 }
 
 async function startNativeRecording() {
-  if (!overlayAPI.startVoiceCapture) {
+  if (!overlayBridge.startVoiceCapture) {
     throw new Error("当前桌面桥接未启用原生录音接口。");
   }
-  const result = await overlayAPI.startVoiceCapture();
+  const result = await overlayBridge.startVoiceCapture();
   if (!result?.ok) {
     throw new Error(result?.error || "原生录音启动失败。");
   }
@@ -511,10 +573,10 @@ async function startNativeRecording() {
 }
 
 async function stopNativeRecording() {
-  if (!overlayAPI.stopVoiceCapture) {
+  if (!overlayBridge.stopVoiceCapture) {
     throw new Error("当前桌面桥接未启用原生录音接口。");
   }
-  const result = await overlayAPI.stopVoiceCapture();
+  const result = await overlayBridge.stopVoiceCapture();
   nativeRecording = false;
   recording = false;
   recordButton.classList.remove("recording");
@@ -533,7 +595,7 @@ async function stopNativeRecording() {
 
 async function handleVoiceBlob(blob) {
   try {
-    const audioBase64 = await overlayAPI.audioToBase64(blob);
+    const audioBase64 = await overlayBridge.audioToBase64(blob);
     const execution = await executeSelectedTools(audioBase64, blob.type || "audio/webm");
     voiceProvider.textContent = execution.provider || "ASR";
     voiceOrbLabel.textContent = "语音";
@@ -553,7 +615,7 @@ async function handleVoiceBlob(blob) {
 async function undoLastOperation() {
   setBusy("撤销中");
   try {
-    const result = await overlayAPI.callMcpTool("calendar.undo_last_operation", {});
+    const result = await overlayBridge.callMcpTool("calendar.undo_last_operation", {});
     applyAgentResult({
       ...result,
       intent: "undo_last_operation",
@@ -579,7 +641,7 @@ async function confirmPendingOperation(confirmed) {
   }
   setBusy(confirmed ? "确认中" : "取消中");
   try {
-    const result = await overlayAPI.callMcpTool("calendar.confirm_operation", {
+    const result = await overlayBridge.callMcpTool("calendar.confirm_operation", {
       operation_id: pendingOperationId,
       confirmed,
     });
@@ -609,7 +671,7 @@ async function resolveCandidateSelection(index) {
   }
   setBusy("处理中");
   try {
-    const result = await overlayAPI.callMcpTool("calendar.resolve_candidate", {
+    const result = await overlayBridge.callMcpTool("calendar.resolve_candidate", {
       intent: pendingIntent,
       candidate_id: candidate.id,
       timezone: "Asia/Shanghai",
@@ -628,16 +690,19 @@ async function resolveCandidateSelection(index) {
 }
 
 expandPanelButton.addEventListener("click", async () => {
+  debugLog("click:expand");
   await setMode("expanded");
 });
 
 closePanelButton.addEventListener("click", async () => {
+  debugLog("click:close");
   await setMode("compact");
 });
 
 openCalendarButton.addEventListener("click", async () => {
+  debugLog("click:open-calendar");
   try {
-    const result = await overlayAPI.openCalendar();
+    const result = await overlayBridge.openCalendar();
     if (result && result.ok === true) {
       replyMessage.textContent = "已打开浏览器日历页面。";
       replyText.textContent = "已打开浏览器日历页面。";
@@ -666,6 +731,7 @@ toolPanelToggleButton.addEventListener("click", () => {
 });
 
 recordButton.addEventListener("click", async () => {
+  debugLog("click:record", { nativeAudioCapture, nativeRecording, recording });
   try {
     if (nativeAudioCapture) {
       if (!nativeRecording) {
@@ -714,10 +780,26 @@ candidateList.addEventListener("click", async (event) => {
 });
 
 bootstrap().catch((error) => {
+  debugLog("bootstrap:error", { message: String(error.message || error) });
   backendText.textContent = "连接失败";
   stateText.textContent = "error";
   const message = String(error.message || error);
   replyText.textContent = message;
   replyMessage.textContent = message;
   parserSource.textContent = "解析来源：未初始化";
+});
+
+window.addEventListener("error", (event) => {
+  debugLog("window:error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+  });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  debugLog("window:unhandledrejection", {
+    reason: String(event.reason?.message || event.reason || "unknown"),
+  });
 });

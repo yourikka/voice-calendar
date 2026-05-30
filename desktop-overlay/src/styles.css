@@ -95,6 +95,7 @@ button {
 .compact-dock.pywebview-drag-region,
 .panel-header.pywebview-drag-region {
   cursor: grab;
+  -webkit-app-region: drag;
 }
 
 .compact-dock.pywebview-drag-region:active,
@@ -111,6 +112,26 @@ button {
 
 .drag-handle {
   touch-action: none;
+  -webkit-app-region: drag;
+}
+
+button,
+.tool-toggle,
+.candidate-button,
+.section-toggle,
+.header-actions,
+.header-actions *,
+.confirmation-panel,
+.confirmation-panel *,
+.result-panel,
+.candidate-panel,
+.tool-panel-body,
+.tool-checklist {
+  -webkit-app-region: no-drag;
+}
+
+.compact-drag-handle {
+  -webkit-app-region: drag;
 }
 
 .icon-button,
