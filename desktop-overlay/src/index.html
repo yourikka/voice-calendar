@@ -37,8 +37,16 @@
 
         <section class="result-panel">
           <div class="panel-meta">
-            <span class="panel-label">智能体回复</span>
-            <span id="state-text">待命</span>
+            <span class="panel-label">对话</span>
+            <div class="result-actions">
+              <span id="state-text">待命</span>
+              <button id="undo-button" class="ghost-button compact-button" type="button">撤销</button>
+            </div>
+          </div>
+          <div id="chat-log" class="chat-log" aria-live="polite">
+            <article class="chat-message assistant">
+              <p>等待命令</p>
+            </article>
           </div>
           <p id="reply-text" class="result-block">等待命令</p>
 
@@ -56,16 +64,19 @@
           </div>
 
           <div class="panel-meta">
-            <span class="panel-label">识别文本</span>
+            <span class="panel-label">语音输入</span>
             <span id="voice-provider">未录音</span>
           </div>
           <p id="transcript-text" class="result-block">等待语音输入</p>
 
-          <div class="panel-meta">
-            <span class="panel-label">执行结果</span>
-            <span id="intent-text">未执行</span>
-          </div>
-          <pre id="result-text" class="result-block">等待命令</pre>
+          <details class="debug-panel">
+            <summary>调试详情</summary>
+            <div class="panel-meta">
+              <span class="panel-label">执行结果</span>
+              <span id="intent-text">未执行</span>
+            </div>
+            <pre id="result-text" class="result-block">等待命令</pre>
+          </details>
         </section>
       </section>
     </main>

@@ -10,12 +10,14 @@ const intentText = document.querySelector("#intent-text");
 const voiceProvider = document.querySelector("#voice-provider");
 const replyText = document.querySelector("#reply-text");
 const stateText = document.querySelector("#state-text");
+const chatLog = document.querySelector("#chat-log");
 const candidatePanel = document.querySelector("#candidate-panel");
 const candidateCount = document.querySelector("#candidate-count");
 const candidateList = document.querySelector("#candidate-list");
 const confirmationPanel = document.querySelector("#confirmation-panel");
 const confirmButton = document.querySelector("#confirm-button");
 const cancelButton = document.querySelector("#cancel-button");
+const undoButton = document.querySelector("#undo-button");
 
 let mediaRecorder = null;
 let mediaStream = null;
@@ -30,6 +32,7 @@ let pendingSlots = {};
 async function bootstrap() {
   const config = await window.overlayAPI.getConfig();
   backendText.textContent = config.backendBaseUrl;
+  undoButton.disabled = true;
 }
 
 function setBusy(label) {
@@ -38,6 +41,20 @@ function setBusy(label) {
 
 function setIdle() {
   statusText.textContent = "待命";
+}
+
+function appendChatMessage(role, text) {
+  if (!text) return;
+  if (chatLog.children.length === 1 && chatLog.textContent.trim() === "等待命令") {
+    chatLog.innerHTML = "";
+  }
+  const item = document.createElement("article");
+  item.className = `chat-message ${role}`;
+  const paragraph = document.createElement("p");
+  paragraph.textContent = text;
+  item.appendChild(paragraph);
+  chatLog.appendChild(item);
+  chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 function formatCandidateTime(value) {
@@ -71,6 +88,7 @@ function applyAgentResult(result) {
   stateText.textContent = result.state || "unknown";
   replyText.textContent = result.reply_text || "已处理。";
   resultText.textContent = JSON.stringify(result, null, 2);
+  appendChatMessage("assistant", result.reply_text || "已处理。");
 
   candidatePanel.hidden = true;
   confirmationPanel.hidden = true;
@@ -90,6 +108,14 @@ function applyAgentResult(result) {
     pendingIntent = null;
     pendingSlots = {};
   }
+
+  undoButton.disabled = result.state !== "completed";
+
+  if (result.state === "collecting_slots" && result.missing_fields?.length) {
+    commandInput.placeholder = `${result.reply_text} 例如：明天晚上八点`;
+  } else {
+    commandInput.placeholder = "例如：明晚八点提醒我开周会";
+  }
 }
 
 async function sendCommand(text) {
@@ -97,6 +123,7 @@ async function sendCommand(text) {
   if (!trimmed) return;
 
   setBusy("执行中");
+  appendChatMessage("user", trimmed);
   try {
     const result = await window.overlayAPI.callMcpTool("calendar.handle_command", {
       text: trimmed,
@@ -162,6 +189,7 @@ async function transcribeAndSend(blob) {
     transcriptText.textContent = result.transcript || "";
     voiceProvider.textContent = result.asr_provider || "unknown";
     commandInput.value = result.transcript || "";
+    appendChatMessage("user", result.transcript || "语音输入");
     applyAgentResult(result);
     setIdle();
   } catch (error) {
@@ -171,6 +199,26 @@ async function transcribeAndSend(blob) {
     stateText.textContent = "error";
     replyText.textContent = "语音转写失败";
     resultText.textContent = "语音转写失败";
+    setIdle();
+  }
+}
+
+async function undoLastOperation() {
+  setBusy("撤销中");
+  try {
+    const result = await window.overlayAPI.callMcpTool("calendar.undo_last_operation", {});
+    applyAgentResult({
+      ...result,
+      intent: "undo_last_operation",
+      session_id: sessionId,
+      slots: {},
+      candidates: [],
+      requires_user_input: false,
+    });
+  } catch (error) {
+    replyText.textContent = String(error.message || error);
+    stateText.textContent = "error";
+  } finally {
     setIdle();
   }
 }
@@ -251,6 +299,10 @@ candidateList.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-candidate-index]");
   if (!button) return;
   await resolveCandidateSelection(Number(button.dataset.candidateIndex));
+});
+
+undoButton.addEventListener("click", async () => {
+  await undoLastOperation();
 });
 
 bootstrap().catch((error) => {
