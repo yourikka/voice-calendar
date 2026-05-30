@@ -4,7 +4,6 @@ import argparse
 import base64
 import json
 import os
-import shlex
 import shutil
 import signal
 import socket
@@ -17,10 +16,26 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-import webbrowser
 
 import httpx
 import webview
+
+from browser_launcher import open_system_browser
+from desktop_lite_config import (
+    BACKEND_BASE_URL,
+    COMPACT_MIN_HEIGHT,
+    COMPACT_MIN_WIDTH,
+    COMPACT_SIZE,
+    DEFAULT_BROWSER_CMD,
+    EXPANDED_MIN_HEIGHT,
+    EXPANDED_SIZE,
+    NOTIFY_LOG_FILE,
+    OVERLAY_HTML,
+    PROJECT_ROOT,
+    SNAP_MARGIN,
+    STATE_FILE,
+    TOOL_OPTIONS,
+)
 
 try:
     import gi
@@ -29,42 +44,6 @@ try:
     from gi.repository import Gdk
 except Exception:  # pragma: no cover
     Gdk = None
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OVERLAY_HTML = PROJECT_ROOT / "desktop-overlay" / "src" / "index.html"
-STATE_FILE = PROJECT_ROOT / ".desktop-lite-state.json"
-NOTIFY_LOG_FILE = PROJECT_ROOT / ".desktop-lite-notify.log"
-BACKEND_BASE_URL = "http://127.0.0.1:8000"
-DESKTOP_LITE_HTTP_PORT = None
-DEFAULT_BROWSER_CMD = os.getenv("VOICE_CALENDAR_BROWSER_CMD", "").strip()
-COMPACT_SIZE = {"width": 126, "height": 64}
-COMPACT_MIN_WIDTH = 108
-COMPACT_MIN_HEIGHT = 52
-EXPANDED_SIZE = {"width": 456, "height": 468}
-EXPANDED_MIN_HEIGHT = 168
-SNAP_MARGIN = 16
-TOOL_OPTIONS = [
-    {
-        "value": "voice.handle_command",
-        "label": "语音日历",
-        "description": "录音后直接识别并执行日历命令，适合多轮语音补全。",
-    },
-    {
-        "value": "calendar.handle_command",
-        "label": "文本日历命令",
-        "description": "文本和转写结果都直接进入日历命令解析。",
-    },
-    {
-        "value": "news.get_today_hot_topics",
-        "label": "今日热点",
-        "description": "获取当天热点资讯，语音输入会先转写再触发热点工具。",
-    },
-]
-WSL_EDGE_CANDIDATES = (
-    "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-    "/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe",
-)
 
 
 @dataclass
@@ -219,112 +198,7 @@ class OverlayBridge:
         return response.json()["result"]
 
     def open_calendar(self) -> dict:
-        url = f"{self._backend_base_url}/"
-        launch_attempts: list[str] = []
-
-        # Highest-priority explicit command: VOICE_CALENDAR_BROWSER_CMD
-        if self._browser_cmd:
-            tokens = shlex.split(self._browser_cmd)
-            if tokens:
-                command = [token.replace("%s", url) for token in tokens]
-                if not any("%s" in token for token in tokens):
-                    command.append(url)
-                ok, detail = self._run_browser_command(command)
-                launch_attempts.append(f"{' '.join(command)} -> {detail}")
-                if ok:
-                    return {"ok": True, "target": command[0], "url": url}
-
-        browser_env = os.getenv("BROWSER", "").strip()
-        if browser_env:
-            for item in browser_env.split(os.pathsep):
-                entry = item.strip()
-                if not entry:
-                    continue
-                tokens = shlex.split(entry)
-                if not tokens:
-                    continue
-                command = [token.replace("%s", url) for token in tokens]
-                if not any("%s" in token for token in tokens):
-                    command.append(url)
-                ok, detail = self._run_browser_command(command)
-                launch_attempts.append(f"{' '.join(command)} -> {detail}")
-                if ok:
-                    return {"ok": True, "target": command[0], "url": url}
-
-        # Common Edge executable names on Linux.
-        for binary in (
-            "microsoft-edge",
-            "microsoft-edge-stable",
-            "microsoft-edge-beta",
-            "microsoft-edge-dev",
-        ):
-            if shutil.which(binary) is None:
-                continue
-            command = [binary, url]
-            ok, detail = self._run_browser_command(command)
-            launch_attempts.append(f"{' '.join(command)} -> {detail}")
-            if ok:
-                return {"ok": True, "target": binary, "url": url}
-
-        # In WSL, prefer the Windows Edge binary directly if present.
-        if "microsoft-standard-WSL" in os.uname().release:
-            for edge_path in WSL_EDGE_CANDIDATES:
-                if not Path(edge_path).exists():
-                    continue
-                command = [edge_path, url]
-                ok, detail = self._run_browser_command(command)
-                launch_attempts.append(f"{' '.join(command)} -> {detail}")
-                if ok:
-                    return {"ok": True, "target": edge_path, "url": url}
-
-        for command in (["gio", "open", url], ["xdg-open", url], ["sensible-browser", url]):
-            if shutil.which(command[0]) is None:
-                continue
-            ok, detail = self._run_browser_command(command)
-            launch_attempts.append(f"{' '.join(command)} -> {detail}")
-            if ok:
-                return {"ok": True, "target": command[0], "url": url}
-
-        try:
-            opened = webbrowser.open(url)
-            launch_attempts.append(f"webbrowser.open -> {opened}")
-            if opened:
-                return {"ok": True, "target": "webbrowser", "url": url}
-        except Exception as exc:
-            launch_attempts.append(f"webbrowser.open -> {exc}")
-
-        attempts = "; ".join(launch_attempts) if launch_attempts else "none"
-        hint = (
-            "请先安装浏览器，或设置 VOICE_CALENDAR_BROWSER_CMD，例如 "
-            "VOICE_CALENDAR_BROWSER_CMD='microsoft-edge %s'。"
-        )
-        return {
-            "ok": False,
-            "target": "system-browser",
-            "url": url,
-            "error": f"无法打开系统浏览器。{hint} 尝试结果: {attempts}",
-        }
-
-    @staticmethod
-    def _run_browser_command(command: list[str]) -> tuple[bool, str]:
-        try:
-            completed = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5.0,
-                check=False,
-            )
-        except Exception as exc:
-            return False, f"exception: {exc}"
-
-        if completed.returncode == 0:
-            return True, "ok"
-        stderr = (completed.stderr or "").strip()
-        stdout = (completed.stdout or "").strip()
-        detail = stderr or stdout or "failed"
-        return False, f"rc={completed.returncode} {detail}"
+        return open_system_browser(f"{self._backend_base_url}/", self._browser_cmd)
 
     def start_voice_capture(self) -> dict:
         if self._record_process and self._record_process.poll() is None:
