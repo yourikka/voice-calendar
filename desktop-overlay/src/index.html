@@ -37,6 +37,25 @@
 
         <section class="result-panel">
           <div class="panel-meta">
+            <span class="panel-label">智能体回复</span>
+            <span id="state-text">待命</span>
+          </div>
+          <p id="reply-text" class="result-block">等待命令</p>
+
+          <div id="candidate-panel" class="candidate-panel" hidden>
+            <div class="panel-meta">
+              <span class="panel-label">候选日程</span>
+              <span id="candidate-count">0</span>
+            </div>
+            <div id="candidate-list" class="candidate-list"></div>
+          </div>
+
+          <div id="confirmation-panel" class="confirmation-panel" hidden>
+            <button id="confirm-button" class="primary-button" type="button">确认</button>
+            <button id="cancel-button" class="ghost-button" type="button">取消</button>
+          </div>
+
+          <div class="panel-meta">
             <span class="panel-label">识别文本</span>
             <span id="voice-provider">未录音</span>
           </div>

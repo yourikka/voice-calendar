@@ -13,6 +13,7 @@ def test_build_mcp_server_exposes_named_tools() -> None:
     assert "calendar.get_event" in tool_names
     assert "calendar.create_event" in tool_names
     assert "calendar.create_event_draft" in tool_names
+    assert "calendar.resolve_candidate" in tool_names
     assert "calendar.delete_event" in tool_names
     assert "calendar.get_meta" in tool_names
     assert "calendar.get_hot_topic_panel" in tool_names

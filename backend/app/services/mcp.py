@@ -4,8 +4,9 @@ import base64
 import binascii
 from dataclasses import asdict
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, time
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from app.models import (
     CalendarMetaDayRead,
@@ -120,6 +121,9 @@ class MCPToolService:
                     "reply_text": f"已更新{updated.event.title}。",
                 },
             )
+
+        if tool_name == "calendar.resolve_candidate":
+            return self._response(tool_name, self._resolve_candidate(arguments))
 
         if tool_name == "calendar.update_event_draft":
             event_id = arguments["event_id"]
@@ -267,3 +271,84 @@ class MCPToolService:
             content_type=arguments.get("content_type", "application/octet-stream"),
             locale=arguments.get("locale", "zh-CN"),
         )
+
+    def _resolve_candidate(self, arguments: dict) -> dict:
+        intent = arguments["intent"]
+        candidate_id = arguments["candidate_id"]
+        timezone_name = arguments.get("timezone", "Asia/Shanghai")
+        session_id = arguments.get("session_id")
+        slots = arguments.get("slots") or {}
+
+        if intent == "delete_event":
+            candidate = self.calendar.get_event(candidate_id)
+            operation = self.calendar.create_delete_draft(candidate_id)
+            return {
+                "session_id": session_id,
+                "state": "awaiting_confirmation",
+                "intent": intent,
+                "reply_text": f"找到{candidate.title}，确认取消吗？",
+                "requires_user_input": True,
+                "operation_id": operation.id,
+                "event": None,
+                "candidates": [
+                    {
+                        "id": candidate.id,
+                        "title": candidate.title,
+                        "start_at": candidate.start_at.isoformat(),
+                        "end_at": candidate.end_at.isoformat() if candidate.end_at else None,
+                    }
+                ],
+                "slots": slots,
+                "missing_fields": [],
+            }
+
+        if intent == "update_event":
+            existing = self.calendar.get_event(candidate_id)
+            start_at, end_at = self._resolve_candidate_update_time(slots, timezone_name, existing)
+            updated = self.calendar.update_event(
+                candidate_id,
+                EventUpdate(start_at=start_at, end_at=end_at),
+            )
+            conflict_text = "，但存在时间冲突" if updated.conflicts else ""
+            return {
+                "session_id": session_id,
+                "state": "completed",
+                "intent": intent,
+                "reply_text": f"已将{updated.event.title}改到{start_at.strftime('%m月%d日%H:%M')}{conflict_text}。",
+                "requires_user_input": False,
+                "operation_id": None,
+                "event": updated.event.model_dump(mode="json"),
+                "candidates": [],
+                "slots": slots,
+                "missing_fields": [],
+            }
+
+        raise ValueError(f"Unsupported candidate intent: {intent}")
+
+    @staticmethod
+    def _resolve_candidate_update_time(
+        slots: dict,
+        timezone_name: str,
+        existing,
+    ) -> tuple[datetime, datetime | None]:
+        zone = ZoneInfo(timezone_name)
+        new_date = slots.get("new_date")
+        new_start_time = slots.get("new_start_time")
+        if not new_date or not new_start_time:
+            raise ValueError("Missing new_date or new_start_time for update candidate resolution.")
+
+        start_at = datetime.combine(
+            date.fromisoformat(new_date),
+            time.fromisoformat(new_start_time),
+            tzinfo=zone,
+        )
+        new_end_time = slots.get("new_end_time")
+        if new_end_time:
+            return start_at, datetime.combine(
+                date.fromisoformat(new_date),
+                time.fromisoformat(new_end_time),
+                tzinfo=zone,
+            )
+        if existing.end_at:
+            return start_at, start_at + (existing.end_at - existing.start_at)
+        return start_at, None

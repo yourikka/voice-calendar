@@ -183,3 +183,71 @@ def test_mcp_voice_tools_reuse_asr_and_command_pipeline(client: TestClient) -> N
         assert result["event"]["title"] == "带身份证"
     finally:
         app.dependency_overrides.pop(get_asr_service, None)
+
+
+def test_mcp_resolve_candidate_supports_delete_confirmation_flow(client: TestClient) -> None:
+    first = client.post(
+        "/api/events",
+        json={
+            "title": "周会A",
+            "start_at": "2026-05-30T10:00:00+08:00",
+            "end_at": "2026-05-30T11:00:00+08:00",
+        },
+    ).json()["event"]
+    second = client.post(
+        "/api/events",
+        json={
+            "title": "周会B",
+            "start_at": "2026-05-30T15:00:00+08:00",
+            "end_at": "2026-05-30T16:00:00+08:00",
+        },
+    ).json()["event"]
+
+    command = client.post(
+        "/api/mcp/tools/calendar.handle_command",
+        json={
+            "arguments": {
+                "text": "取消明天的周会",
+                "timezone": "Asia/Shanghai",
+                "now": "2026-05-29T10:00:00+08:00",
+            }
+        },
+    )
+    assert command.status_code == 200
+    body = command.json()["result"]
+    assert body["state"] == "selecting_candidate"
+    assert len(body["candidates"]) == 2
+
+    resolved = client.post(
+        "/api/mcp/tools/calendar.resolve_candidate",
+        json={
+            "arguments": {
+                "intent": "delete_event",
+                "candidate_id": first["id"],
+                "timezone": "Asia/Shanghai",
+                "session_id": body["session_id"],
+                "slots": body["slots"],
+            }
+        },
+    )
+    assert resolved.status_code == 200
+    result = resolved.json()["result"]
+    assert result["state"] == "awaiting_confirmation"
+    assert result["operation_id"]
+    assert result["reply_text"].startswith("找到周会A")
+
+    confirm = client.post(
+        "/api/mcp/tools/calendar.confirm_operation",
+        json={"arguments": {"operation_id": result["operation_id"], "confirmed": True}},
+    )
+    assert confirm.status_code == 200
+    assert confirm.json()["result"]["state"] == "completed"
+
+    remaining = client.get(
+        "/api/events",
+        params={
+            "start": "2026-05-30T00:00:00+08:00",
+            "end": "2026-05-31T00:00:00+08:00",
+        },
+    ).json()["items"]
+    assert [item["id"] for item in remaining] == [second["id"]]

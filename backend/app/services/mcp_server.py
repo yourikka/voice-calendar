@@ -264,6 +264,32 @@ def build_mcp_server(
         )
 
     @server.tool(
+        name="calendar.resolve_candidate",
+        description="Resolve a candidate selection for delete/update flows and continue the operation.",
+    )
+    def resolve_calendar_candidate(
+        intent: str,
+        candidate_id: str,
+        timezone: str = "Asia/Shanghai",
+        session_id: str | None = None,
+        slots: dict[str, Any] | None = None,
+        ctx: Context = None,
+    ) -> dict[str, Any]:
+        return _call(
+            ctx,
+            "calendar.resolve_candidate",
+            _drop_none(
+                {
+                    "intent": intent,
+                    "candidate_id": candidate_id,
+                    "timezone": timezone,
+                    "session_id": session_id,
+                    "slots": slots or {},
+                }
+            ),
+        )
+
+    @server.tool(
         name="calendar.delete_event",
         description="Delete a calendar event immediately by event_id.",
     )
