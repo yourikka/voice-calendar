@@ -96,3 +96,54 @@ def test_delete_and_undo(client: TestClient) -> None:
     ).json()
     assert [item["title"] for item in restored["items"]] == ["健身"]
 
+
+def test_rejects_naive_event_datetime(client: TestClient) -> None:
+    response = client.post(
+        "/api/events",
+        json={
+            "title": "无时区事件",
+            "start_at": "2026-06-03T14:00:00",
+            "end_at": "2026-06-03T15:00:00",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "timezone" in response.json()["detail"]
+
+
+def test_cross_timezone_events_are_compared_in_utc(client: TestClient) -> None:
+    first = client.post(
+        "/api/events",
+        json={
+            "title": "上海会议",
+            "start_at": "2026-06-03T14:00:00+08:00",
+            "end_at": "2026-06-03T15:00:00+08:00",
+            "timezone": "Asia/Shanghai",
+        },
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        "/api/events",
+        json={
+            "title": "东京会议",
+            "start_at": "2026-06-03T15:30:00+09:00",
+            "end_at": "2026-06-03T16:30:00+09:00",
+            "timezone": "Asia/Tokyo",
+        },
+    )
+
+    assert second.status_code == 201
+    conflicts = second.json()["conflicts"]
+    assert [item["title"] for item in conflicts] == ["上海会议"]
+
+    list_response = client.get(
+        "/api/events",
+        params={
+            "start": "2026-06-03T06:00:00+00:00",
+            "end": "2026-06-03T07:00:00+00:00",
+        },
+    )
+    assert list_response.status_code == 200
+    assert [item["title"] for item in list_response.json()["items"]] == ["上海会议", "东京会议"]
+    assert list_response.json()["items"][0]["start_at"] == "2026-06-03T14:00:00+08:00"

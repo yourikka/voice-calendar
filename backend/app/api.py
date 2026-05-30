@@ -44,6 +44,7 @@ from app.services.asr import ASRRequestError, ASRService, ASRUnavailableError
 from app.services.briefing import DailyBriefingService
 from app.services.calendar import CalendarService
 from app.services.command import TextCommandService
+from app.services.conversation_state import PendingCommandStore
 from app.services.mcp import MCPToolService
 from app.services.news import NewsService
 from app.services.nlu import HybridCommandParser
@@ -86,6 +87,7 @@ def get_text_command_service(
         news=NewsService(conn),
         briefing=DailyBriefingService(conn),
         parser=parser,
+        pending_store=PendingCommandStore(conn),
     )
 
 
@@ -116,7 +118,10 @@ def list_events(
     calendar_id: str = "primary",
     service: CalendarService = Depends(get_calendar_service),
 ) -> EventListResponse:
-    return EventListResponse(items=service.list_events(start, end, calendar_id))
+    try:
+        return EventListResponse(items=service.list_events(start, end, calendar_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/events", response_model=EventCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -124,7 +129,10 @@ def create_event(
     payload: EventCreate = Body(embed=False),
     service: CalendarService = Depends(get_calendar_service),
 ) -> EventCreateResponse:
-    return service.create_event(payload)
+    try:
+        return service.create_event(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/events/{event_id}", response_model=EventRead)
@@ -146,6 +154,8 @@ def update_event(
 ) -> EventCreateResponse:
     try:
         return service.update_event(event_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Event not found") from exc
 
@@ -187,14 +197,17 @@ def list_due_notifications(
     now: datetime | None = Query(None),
     service: CalendarService = Depends(get_calendar_service),
 ) -> DueReminderListResponse:
-    return DueReminderListResponse(
-        items=service.list_due_reminders(
-            channel=channel,
-            now=now,
-            lookback_seconds=lookback_seconds,
-            limit=limit,
+    try:
+        return DueReminderListResponse(
+            items=service.list_due_reminders(
+                channel=channel,
+                now=now,
+                lookback_seconds=lookback_seconds,
+                limit=limit,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/notifications/ack", response_model=NotificationAcknowledgeResponse)
@@ -213,7 +226,10 @@ def handle_text_command(
     payload: TextCommandRequest,
     service: TextCommandService = Depends(get_text_command_service),
 ) -> TextCommandResponse:
-    return service.handle(payload)
+    try:
+        return service.handle(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/voice/capabilities", response_model=VoiceCapabilitiesResponse)
@@ -376,5 +392,7 @@ def call_mcp_tool(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ASRRequestError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="MCP tool not found") from exc

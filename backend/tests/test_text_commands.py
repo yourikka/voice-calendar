@@ -232,3 +232,32 @@ def test_text_command_collects_missing_time(client: TestClient) -> None:
     assert body["state"] == "collecting_slots"
     assert body["missing_fields"] == ["time"]
     assert body["requires_user_input"] is True
+
+
+def test_pending_text_command_survives_new_request_connection(client: TestClient) -> None:
+    first = client.post(
+        "/api/text/commands",
+        json={
+            "text": "提醒我带身份证",
+            "timezone": "Asia/Shanghai",
+            "now": "2026-05-29T10:00:00+08:00",
+        },
+    )
+    assert first.status_code == 200
+    session_id = first.json()["session_id"]
+
+    second = client.post(
+        "/api/text/commands",
+        json={
+            "text": "明早八点",
+            "timezone": "Asia/Shanghai",
+            "session_id": session_id,
+            "now": "2026-05-29T10:00:00+08:00",
+        },
+    )
+
+    assert second.status_code == 200
+    body = second.json()
+    assert body["state"] == "completed"
+    assert body["event"]["title"] == "带身份证"
+    assert body["event"]["start_at"] == "2026-05-30T08:00:00+08:00"

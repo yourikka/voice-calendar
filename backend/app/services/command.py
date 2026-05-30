@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -18,17 +16,7 @@ from app.services.nlu import (
     normalize_text,
     request_now,
 )
-
-
-@dataclass
-class PendingCommandState:
-    parsed: ParsedCommand
-    updated_at: datetime
-
-
-_PENDING_COMMANDS: dict[str, PendingCommandState] = {}
-_PENDING_LOCK = threading.Lock()
-_PENDING_TTL = timedelta(minutes=30)
+from app.services.conversation_state import PendingCommandStore
 
 
 def _session_id(existing: str | None) -> str:
@@ -48,30 +36,6 @@ def _build_reminders(offset_minutes: int | None, default_zero: bool = False) -> 
     if offset_minutes is None and not default_zero:
         return []
     return [Reminder(method="notification", offset_minutes=offset_minutes or 0)]
-
-
-def _get_pending_command(session_id: str) -> PendingCommandState | None:
-    with _PENDING_LOCK:
-        pending = _PENDING_COMMANDS.get(session_id)
-        if pending is None:
-            return None
-        if datetime.now(timezone.utc) - pending.updated_at > _PENDING_TTL:
-            _PENDING_COMMANDS.pop(session_id, None)
-            return None
-        return pending
-
-
-def _save_pending_command(session_id: str, parsed: ParsedCommand) -> None:
-    with _PENDING_LOCK:
-        _PENDING_COMMANDS[session_id] = PendingCommandState(
-            parsed=parsed,
-            updated_at=datetime.now(timezone.utc),
-        )
-
-
-def _clear_pending_command(session_id: str) -> None:
-    with _PENDING_LOCK:
-        _PENDING_COMMANDS.pop(session_id, None)
 
 
 def _missing_prompt(parsed: ParsedCommand) -> str:
@@ -95,18 +59,20 @@ class TextCommandService:
         news: NewsService | None = None,
         briefing: DailyBriefingService | None = None,
         parser: HybridCommandParser | None = None,
+        pending_store: PendingCommandStore | None = None,
     ) -> None:
         self.calendar = calendar
         self.news = news
         self.briefing = briefing
         self.parser = parser or HybridCommandParser()
+        self.pending_store = pending_store
 
     def parse(self, request: TextCommandRequest) -> ParsedCommand:
         return self.parser.parse(request)
 
     def handle(self, request: TextCommandRequest) -> TextCommandResponse:
         session_id = _session_id(request.session_id)
-        pending = _get_pending_command(session_id)
+        pending = self.pending_store.get(session_id) if self.pending_store else None
         if pending is not None:
             parsed = self.parser.parse_rule_only(request)
             parsed = self._merge_pending_command(request, parsed, pending.parsed)
@@ -150,7 +116,8 @@ class TextCommandService:
         session_id: str,
     ) -> TextCommandResponse:
         if parsed.missing_fields:
-            _save_pending_command(session_id, parsed)
+            if self.pending_store:
+                self.pending_store.save(session_id, parsed)
             return self._response(
                 request,
                 parsed,
@@ -161,7 +128,7 @@ class TextCommandService:
             )
 
         if parsed.intent == "get_daily_briefing":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             if self.briefing:
                 briefing = self.briefing.get_daily_briefing(
                     date=parsed.slots["date"],
@@ -173,7 +140,7 @@ class TextCommandService:
             return self._response(request, parsed, session_id, state="completed", reply_text=reply_text)
 
         if parsed.intent == "get_today_news":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             if self.news:
                 news = self.news.get_today_news(
                     timezone_name=request.timezone,
@@ -187,7 +154,7 @@ class TextCommandService:
             return self._response(request, parsed, session_id, state="completed", reply_text=reply_text)
 
         if parsed.intent == "undo_last_operation":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             result = self.calendar.undo_last_operation()
             return self._response(
                 request,
@@ -199,7 +166,7 @@ class TextCommandService:
             )
 
         if parsed.intent == "create_reminder":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             start_at = _slot_datetime(parsed.slots["date"], parsed.slots["time"], request.timezone)
             title = parsed.slots["title"]
             created = self.calendar.create_event(
@@ -223,7 +190,7 @@ class TextCommandService:
             )
 
         if parsed.intent == "create_event":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             start_at = _slot_datetime(parsed.slots["date"], parsed.slots["start_time"], request.timezone)
             if parsed.slots.get("end_time"):
                 end_at = _slot_datetime(parsed.slots["date"], parsed.slots["end_time"], request.timezone)
@@ -253,7 +220,7 @@ class TextCommandService:
             )
 
         if parsed.intent == "list_events":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             start = datetime.fromisoformat(parsed.slots["start"])
             end = datetime.fromisoformat(parsed.slots["end"])
             events = self.calendar.list_events(start, end)
@@ -265,7 +232,7 @@ class TextCommandService:
             return self._response(request, parsed, session_id, state="completed", reply_text=reply)
 
         if parsed.intent == "delete_event":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             start = datetime.fromisoformat(parsed.slots["start"])
             end = datetime.fromisoformat(parsed.slots["end"])
             keyword = parsed.slots.get("title", "")
@@ -326,7 +293,7 @@ class TextCommandService:
             )
 
         if parsed.intent == "update_event":
-            _clear_pending_command(session_id)
+            self._clear_pending_command(session_id)
             start_at, explicit_end_at = self._resolve_update_times(parsed, request.timezone)
             query_date = parsed.slots.get("target_date") or parsed.slots.get("new_date")
             zone = ZoneInfo(request.timezone)
@@ -370,7 +337,7 @@ class TextCommandService:
                 event=updated.event,
             )
 
-        _clear_pending_command(session_id)
+        self._clear_pending_command(session_id)
         return self._response(
             request,
             parsed,
@@ -500,3 +467,7 @@ class TextCommandService:
             parser="rule+context",
             confidence=0.88 if not missing_fields else 0.58,
         )
+
+    def _clear_pending_command(self, session_id: str) -> None:
+        if self.pending_store:
+            self.pending_store.clear(session_id)

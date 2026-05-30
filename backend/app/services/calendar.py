@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from datetime import datetime, timedelta
 
 from app.models import (
     Candidate,
@@ -18,14 +17,15 @@ from app.models import (
     OperationRead,
     UndoResponse,
 )
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid4().hex}"
+from app.services.calendar_store import (
+    EventRepository,
+    NotificationDeliveryRepository,
+    OperationLogRepository,
+    display_datetime,
+    store_datetime,
+    to_utc,
+    utc_now,
+)
 
 
 def _dump(value: object) -> str:
@@ -38,27 +38,6 @@ def _load_json(value: str | None, fallback: object) -> object:
     return json.loads(value)
 
 
-def _row_to_event(row: sqlite3.Row) -> EventRead:
-    return EventRead(
-        id=row["id"],
-        calendar_id=row["calendar_id"],
-        type=row["type"],
-        title=row["title"],
-        description=row["description"],
-        start_at=datetime.fromisoformat(row["start_at"]),
-        end_at=datetime.fromisoformat(row["end_at"]) if row["end_at"] else None,
-        timezone=row["timezone"],
-        location=row["location"],
-        participants=list(_load_json(row["participants_json"], [])),
-        reminders=list(_load_json(row["reminders_json"], [])),
-        recurrence_rule=_load_json(row["recurrence_rule_json"], None),
-        source=row["source"],
-        status=row["status"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        updated_at=datetime.fromisoformat(row["updated_at"]),
-    )
-
-
 def _event_to_dict(event: EventRead) -> dict:
     return event.model_dump(mode="json")
 
@@ -66,6 +45,9 @@ def _event_to_dict(event: EventRead) -> dict:
 class CalendarService:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
+        self.events = EventRepository(conn)
+        self.operations = OperationLogRepository(conn)
+        self.deliveries = NotificationDeliveryRepository(conn)
 
     def list_due_reminders(
         self,
@@ -75,50 +57,22 @@ class CalendarService:
         lookback_seconds: int = 300,
         limit: int = 20,
     ) -> list[DueReminderRead]:
-        current = now or _utc_now()
+        current = to_utc(now) if now else utc_now()
         window_start = current - timedelta(seconds=lookback_seconds)
-        rows = self.conn.execute(
-            """
-            SELECT
-                e.id AS event_id,
-                e.title,
-                e.description,
-                e.start_at,
-                e.timezone,
-                e.source,
-                nd.id AS delivery_id
-            FROM events e
-            LEFT JOIN notification_deliveries nd
-              ON nd.event_id = e.id AND nd.channel = ?
-            WHERE e.deleted_at IS NULL
-              AND e.status = 'confirmed'
-              AND e.type = 'reminder'
-              AND nd.id IS NULL
-            ORDER BY e.start_at ASC
-            """,
-            (channel,),
-        ).fetchall()
+        rows = self.events.list_undelivered_reminders(channel)
 
         reminders: list[DueReminderRead] = []
         with self.conn:
             for row in rows:
-                start_at = datetime.fromisoformat(row["start_at"])
-                if start_at < window_start or start_at > current:
+                start_at = display_datetime(row["start_at"], row["timezone"])
+                start_at_utc = to_utc(start_at)
+                if start_at_utc < window_start or start_at_utc > current:
                     continue
-                delivery_id = _new_id("notify")
-                self.conn.execute(
-                    """
-                    INSERT INTO notification_deliveries (
-                        id, event_id, channel, scheduled_at, delivered_at, status, created_at
-                    ) VALUES (?, ?, ?, ?, NULL, 'pending', ?)
-                    """,
-                    (
-                        delivery_id,
-                        row["event_id"],
-                        channel,
-                        start_at.isoformat(),
-                        current.isoformat(),
-                    ),
+                delivery_id = self.deliveries.create_pending(
+                    event_id=row["event_id"],
+                    channel=channel,
+                    scheduled_at=start_at,
+                    now=current,
                 )
                 reminders.append(
                     DueReminderRead(
@@ -136,86 +90,29 @@ class CalendarService:
         return reminders
 
     def acknowledge_delivery(self, delivery_id: str, channel: str) -> NotificationAcknowledgeResponse:
-        row = self.conn.execute(
-            "SELECT id FROM notification_deliveries WHERE id = ? AND channel = ?",
-            (delivery_id, channel),
-        ).fetchone()
-        if row is None:
-            raise KeyError(delivery_id)
         with self.conn:
-            self.conn.execute(
-                """
-                UPDATE notification_deliveries
-                SET status = 'delivered', delivered_at = ?
-                WHERE id = ? AND channel = ?
-                """,
-                (_utc_now().isoformat(), delivery_id, channel),
-            )
+            acknowledged = self.deliveries.acknowledge(delivery_id, channel)
+        if not acknowledged:
+            raise KeyError(delivery_id)
         return NotificationAcknowledgeResponse(status="delivered")
 
     def create_event(self, payload: EventCreate) -> EventCreateResponse:
-        now = _utc_now()
-        event_id = _new_id("evt")
         conflicts = self.check_conflicts(
             start_at=payload.start_at,
             end_at=payload.end_at,
             calendar_id=payload.calendar_id,
         )
         with self.conn:
-            self.conn.execute(
-                """
-                INSERT INTO events (
-                    id, calendar_id, type, title, description, start_at, end_at, timezone,
-                    location, participants_json, reminders_json, recurrence_rule_json,
-                    source, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    payload.calendar_id,
-                    payload.type,
-                    payload.title,
-                    payload.description,
-                    payload.start_at.isoformat(),
-                    payload.end_at.isoformat() if payload.end_at else None,
-                    payload.timezone,
-                    payload.location,
-                    _dump(payload.participants),
-                    _dump([reminder.model_dump() for reminder in payload.reminders]),
-                    _dump(payload.recurrence_rule) if payload.recurrence_rule else None,
-                    payload.source,
-                    "confirmed",
-                    now.isoformat(),
-                    now.isoformat(),
-                ),
-            )
-            event = self.get_event(event_id)
-            self._log_operation("create_event", event_id, None, _event_to_dict(event))
+            written = self.events.insert(payload)
+            event = self.get_event(written.id)
+            self._log_operation("create_event", written.id, None, _event_to_dict(event))
         return EventCreateResponse(event=event, conflicts=conflicts)
 
     def list_events(self, start: datetime, end: datetime, calendar_id: str = "primary") -> list[EventRead]:
-        rows = self.conn.execute(
-            """
-            SELECT * FROM events
-            WHERE calendar_id = ?
-              AND deleted_at IS NULL
-              AND status = 'confirmed'
-              AND start_at < ?
-              AND COALESCE(end_at, start_at) >= ?
-            ORDER BY start_at ASC
-            """,
-            (calendar_id, end.isoformat(), start.isoformat()),
-        ).fetchall()
-        return [_row_to_event(row) for row in rows]
+        return self.events.list(start, end, calendar_id)
 
     def get_event(self, event_id: str) -> EventRead:
-        row = self.conn.execute(
-            "SELECT * FROM events WHERE id = ? AND deleted_at IS NULL",
-            (event_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError(event_id)
-        return _row_to_event(row)
+        return self.events.get(event_id)
 
     def update_event(self, event_id: str, payload: EventUpdate) -> EventCreateResponse:
         before = self.get_event(event_id)
@@ -223,37 +120,8 @@ class CalendarService:
         if not update_data:
             return EventCreateResponse(event=before, conflicts=[])
 
-        merged = before.model_dump()
-        merged.update(update_data)
-        reminders = merged.get("reminders") or []
-        if reminders and hasattr(reminders[0], "model_dump"):
-            reminders = [item.model_dump() for item in reminders]
-
-        now = _utc_now()
         with self.conn:
-            self.conn.execute(
-                """
-                UPDATE events
-                SET title = ?, description = ?, start_at = ?, end_at = ?, timezone = ?,
-                    location = ?, participants_json = ?, reminders_json = ?,
-                    recurrence_rule_json = ?, updated_at = ?
-                WHERE id = ? AND deleted_at IS NULL
-                """,
-                (
-                    merged["title"],
-                    merged["description"],
-                    merged["start_at"].isoformat(),
-                    merged["end_at"].isoformat() if merged["end_at"] else None,
-                    merged["timezone"],
-                    merged["location"],
-                    _dump(merged["participants"]),
-                    _dump(reminders),
-                    _dump(merged["recurrence_rule"]) if merged["recurrence_rule"] else None,
-                    now.isoformat(),
-                    event_id,
-                ),
-            )
-            event = self.get_event(event_id)
+            event = self.events.update(event_id, before, payload)
             self._log_operation(
                 "update_event",
                 event_id,
@@ -270,12 +138,8 @@ class CalendarService:
 
     def delete_event(self, event_id: str) -> OperationRead:
         before = self.get_event(event_id)
-        now = _utc_now()
         with self.conn:
-            self.conn.execute(
-                "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
-                (now.isoformat(), now.isoformat(), event_id),
-            )
+            self.events.soft_delete(event_id)
             return self._log_operation(
                 "delete_event",
                 event_id,
@@ -306,12 +170,7 @@ class CalendarService:
             )
 
     def confirm_operation(self, operation_id: str, confirmed: bool) -> ConfirmOperationResponse:
-        row = self.conn.execute(
-            "SELECT * FROM operation_logs WHERE id = ?",
-            (operation_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError(operation_id)
+        row = self.operations.get(operation_id)
         if row["state"] != "awaiting_confirmation":
             return ConfirmOperationResponse(
                 state=row["state"],
@@ -320,10 +179,7 @@ class CalendarService:
 
         if not confirmed:
             with self.conn:
-                self.conn.execute(
-                    "UPDATE operation_logs SET state = 'cancelled' WHERE id = ?",
-                    (operation_id,),
-                )
+                self.operations.mark_state(operation_id, "cancelled")
             return ConfirmOperationResponse(state="cancelled", reply_text="已取消操作。")
 
         operation = row["operation"]
@@ -333,25 +189,16 @@ class CalendarService:
         deleted_count = None
         with self.conn:
             if operation == "delete_event" and target_event_id:
-                self.conn.execute(
-                    "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
-                    (_utc_now().isoformat(), _utc_now().isoformat(), target_event_id),
-                )
+                self.events.soft_delete(target_event_id)
                 if before:
                     event = EventRead.model_validate(before)
                 deleted_count = 1
             elif operation == "delete_events" and isinstance(before, list):
-                now = _utc_now().isoformat()
                 for item in before:
-                    self.conn.execute(
-                        "UPDATE events SET deleted_at = ?, status = 'cancelled', updated_at = ? WHERE id = ?",
-                        (now, now, item["id"]),
-                    )
+                    self.events.soft_delete(item["id"])
                 deleted_count = len(before)
-            self.conn.execute(
-                "UPDATE operation_logs SET state = 'completed' WHERE id = ?",
-                (operation_id,),
-            )
+            self.operations.mark_state(operation_id, "completed")
+
         if deleted_count and deleted_count > 1:
             reply_text = f"已删除 {deleted_count} 个日程。"
         elif event:
@@ -372,39 +219,10 @@ class CalendarService:
         end: datetime,
         calendar_id: str = "primary",
     ) -> list[Candidate]:
-        rows = self.conn.execute(
-            """
-            SELECT id, title, start_at, end_at FROM events
-            WHERE calendar_id = ?
-              AND deleted_at IS NULL
-              AND status = 'confirmed'
-              AND start_at < ?
-              AND COALESCE(end_at, start_at) >= ?
-              AND title LIKE ?
-            ORDER BY start_at ASC
-            """,
-            (calendar_id, end.isoformat(), start.isoformat(), f"%{title_keyword}%"),
-        ).fetchall()
-        return [
-            Candidate(
-                id=row["id"],
-                title=row["title"],
-                start_at=datetime.fromisoformat(row["start_at"]),
-                end_at=datetime.fromisoformat(row["end_at"]) if row["end_at"] else None,
-            )
-            for row in rows
-        ]
+        return self.events.find_by_title(title_keyword, start, end, calendar_id)
 
     def undo_last_operation(self) -> UndoResponse:
-        row = self.conn.execute(
-            """
-            SELECT * FROM operation_logs
-            WHERE state = 'completed' AND undo_expires_at >= ?
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (_utc_now().isoformat(),),
-        ).fetchone()
+        row = self.operations.latest_undoable()
         if row is None:
             return UndoResponse(state="not_available", reply_text="没有可撤销的操作。")
 
@@ -416,20 +234,14 @@ class CalendarService:
 
         with self.conn:
             if operation == "create_event" and after:
-                self.conn.execute(
-                    "UPDATE events SET deleted_at = ?, status = 'cancelled' WHERE id = ?",
-                    (_utc_now().isoformat(), after["id"]),
-                )
+                self.events.soft_delete(after["id"])
             elif operation == "delete_events" and isinstance(before, list):
                 for item in before:
                     self._restore_event(item)
             elif operation in {"delete_event", "update_event"} and before:
                 self._restore_event(before)
                 event = self.get_event(before["id"])
-            self.conn.execute(
-                "UPDATE operation_logs SET state = 'undone' WHERE id = ?",
-                (operation_id,),
-            )
+            self.operations.mark_state(operation_id, "undone")
 
         return UndoResponse(state="undone", event=event, reply_text="已撤销刚才的操作。")
 
@@ -440,71 +252,22 @@ class CalendarService:
         calendar_id: str = "primary",
         exclude_event_id: str | None = None,
     ) -> list[Conflict]:
-        effective_end = end_at or start_at
-        params: list[str] = [calendar_id, effective_end.isoformat(), start_at.isoformat()]
-        exclude_clause = ""
-        if exclude_event_id:
-            exclude_clause = "AND id != ?"
-            params.append(exclude_event_id)
-        rows = self.conn.execute(
-            f"""
-            SELECT id, title, start_at, end_at FROM events
-            WHERE calendar_id = ?
-              AND deleted_at IS NULL
-              AND status = 'confirmed'
-              AND start_at < ?
-              AND COALESCE(end_at, start_at) > ?
-              {exclude_clause}
-            ORDER BY start_at ASC
-            """,
-            params,
-        ).fetchall()
-        return [
-            Conflict(
-                id=row["id"],
-                title=row["title"],
-                start_at=datetime.fromisoformat(row["start_at"]),
-                end_at=datetime.fromisoformat(row["end_at"]) if row["end_at"] else None,
-            )
-            for row in rows
-        ]
+        return self.events.check_conflicts(start_at, end_at, calendar_id, exclude_event_id)
 
     def _log_operation(
         self,
         operation: str,
         target_event_id: str | None,
-        before: dict | None,
+        before: dict | list[dict] | None,
         after: dict | None,
         state: str = "completed",
     ) -> OperationRead:
-        now = _utc_now()
-        operation_id = _new_id("op")
-        undo_expires_at = now + timedelta(minutes=10)
-        self.conn.execute(
-            """
-            INSERT INTO operation_logs (
-                id, operation, target_event_id, before_json, after_json, state,
-                created_at, undo_expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                operation_id,
-                operation,
-                target_event_id,
-                _dump(before) if before else None,
-                _dump(after) if after else None,
-                state,
-                now.isoformat(),
-                undo_expires_at.isoformat(),
-            ),
-        )
-        return OperationRead(
-            id=operation_id,
+        return self.operations.create(
             operation=operation,
             target_event_id=target_event_id,
+            before_json=_dump(before) if before else None,
+            after_json=_dump(after) if after else None,
             state=state,
-            created_at=now,
-            undo_expires_at=undo_expires_at,
         )
 
     def _restore_event(self, data: dict) -> None:
@@ -522,8 +285,8 @@ class CalendarService:
                 data["type"],
                 data["title"],
                 data["description"],
-                data["start_at"],
-                data["end_at"],
+                store_datetime(datetime.fromisoformat(data["start_at"])),
+                store_datetime(datetime.fromisoformat(data["end_at"])) if data["end_at"] else None,
                 data["timezone"],
                 data["location"],
                 _dump(data["participants"]),
@@ -531,7 +294,7 @@ class CalendarService:
                 _dump(data["recurrence_rule"]) if data["recurrence_rule"] else None,
                 data["source"],
                 data["status"],
-                _utc_now().isoformat(),
+                utc_now().isoformat(),
                 data["id"],
             ),
         )
