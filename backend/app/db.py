@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -78,6 +79,16 @@ def initialize_database(settings: Settings | None = None) -> None:
 
 def get_connection() -> Iterator[sqlite3.Connection]:
     db = Database()
+    conn = db.connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_connection_context(settings: Settings | None = None) -> Iterator[sqlite3.Connection]:
+    db = Database(settings)
     conn = db.connect()
     try:
         yield conn

@@ -14,6 +14,10 @@ class Settings:
     app_name: str = "Voice Calendar"
     database_path: Path = Path("backend/data/voice_calendar.db")
     default_timezone: str = "Asia/Shanghai"
+    host: str = "127.0.0.1"
+    port: int = 8000
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8001
     asr_api_url: str | None = None
     asr_api_key: str | None = None
     asr_model: str | None = "base"
@@ -33,6 +37,10 @@ def get_settings() -> Settings:
     database_path = Path(os.getenv("VOICE_CALENDAR_DB", "backend/data/voice_calendar.db"))
     return Settings(
         database_path=database_path,
+        host=os.getenv("VOICE_CALENDAR_HOST", "127.0.0.1"),
+        port=int(os.getenv("VOICE_CALENDAR_PORT", "8000")),
+        mcp_host=os.getenv("VOICE_CALENDAR_MCP_HOST", "127.0.0.1"),
+        mcp_port=int(os.getenv("VOICE_CALENDAR_MCP_PORT", "8001")),
         asr_api_url=os.getenv("VOICE_ASR_API_URL"),
         asr_api_key=os.getenv("VOICE_ASR_API_KEY"),
         asr_model=os.getenv("VOICE_ASR_MODEL", "base"),
